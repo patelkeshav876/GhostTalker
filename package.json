@@ -1,0 +1,20 @@
+{
+  "name": "anonymtalks-bot",
+  "version": "1.0.0",
+  "description": "AnonymTalks — anonymous 1:1 chat Telegram bot (Telegraf + SQLite demo)",
+  "main": "anonymtalks-bot.js",
+  "scripts": {
+    "start": "node anonymtalks-bot.js",
+    "dev": "nodemon anonymtalks-bot.js"
+  },
+  "author": "you",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "sql.js": "^1.14.1",
+    "telegraf": "^4.16.3"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.22"
+  }
+}
