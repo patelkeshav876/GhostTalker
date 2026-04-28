@@ -12,6 +12,14 @@
 
 require('dotenv').config();
 
+// START EXPRESS IMMEDIATELY so Render detects port right away
+const express = require('express');
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.get('/', (req, res) => res.send('👻 GhostTalk Bot is running!'));
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
+app.listen(PORT, '0.0.0.0', () => console.log('🌐 Web server on port ' + PORT));
+
 const { Telegraf, Markup, session } = require('telegraf');
 const fs   = require('fs');
 const crypto = require('crypto');
@@ -1181,3 +1189,4 @@ process.on('SIGINT', () => {
   console.log('✅ AnonymTalks v2 bot is running!');
   console.log(`Admin IDs: ${ADMIN_IDS.join(', ') || 'none set'}`);
 })();
+
