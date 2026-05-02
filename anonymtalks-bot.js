@@ -12,6 +12,7 @@
 
 require('dotenv').config();
 
+
 // START EXPRESS IMMEDIATELY so Render detects port right away
 const express = require('express');
 const app = express();
@@ -520,11 +521,21 @@ async function startSearch(ctx, opts = {}) {
       clearInterval(poll);
       removeFromPools(s.anon_id);
       s.searchingSince = null;
-      await ctx.reply(
-        `🌱 *We're still a growing community!*\n\nNo one is searching right now, but people join every day.\n\n💡 Try again in a few minutes — or share the bot with a friend to bring more people in!\n\n🔗 /refer — get your invite link`,
-        { parse_mode: 'Markdown', ...lobbyKb() }
-      ).catch(() => {});
-    }
+
+     const u = getUser(s.anon_id);
+     if (u.ai_enabled !== 0 && OPENAI_KEY) {
+       await ctx.reply(
+         `😔 *No humans found right now...*\n\nWant to chat with an AI partner while you wait?`,
+         { parse_mode: 'Markdown', ...Markup.inlineKeyboard([
+           [Markup.button.callback('🤖 Chat with AI', 'start_ai_chat')],
+           [Markup.button.callback('🔄 Try Again', 'btn_next'), Markup.button.callback('🏠 Lobby', 'go_lobby')]
+         ])}
+       );
+     } else {
+       await ctx.reply('🌱 *No partners found right now!*\n\nTry again in a few minutes or share your referral link!',
+         { parse_mode: 'Markdown', ...lobbyKb() });
+     }
+   }
   }, 1000);
 }
 
@@ -825,6 +836,310 @@ bot.command('unban', async (ctx) => {
   await ctx.reply(`✅ User unbanned.`);
 });
 
+// ═══════════════════════════════════════════════════════════════════
+// PASTE THIS ENTIRE BLOCK into your anonymtalks-bot.js
+// Add it AFTER the existing bot.command('unban') block (~line 820)
+// ═══════════════════════════════════════════════════════════════════
+
+// ─── NEW ENV VARS NEEDED IN .env ─────────────────────────────────────────────
+// WEBAPP_URL=https://your-webapp.vercel.app
+// OPENAI_API_KEY=sk-...   (get free at platform.openai.com)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const WEBAPP_URL = process.env.WEBAPP_URL || '';
+const OPENAI_KEY = process.env.OPENAI_API_KEY || '';
+
+// ─── AI FALLBACK: call OpenAI when no human partner found ─────────────────────
+// aiSessions: anon_id → conversation history array
+const aiSessions = new Map();
+
+async function askAI(anon_id, userMessage) {
+  if (!OPENAI_KEY) return null;
+  
+  if (!aiSessions.has(anon_id)) {
+    aiSessions.set(anon_id, [
+      {
+        role: 'system',
+        content: `You are a friendly anonymous chat partner on GhostTalk — a Telegram anonymous chat app. 
+Keep responses short (1-3 sentences), conversational, warm and engaging like a real person would chat.
+Never reveal you are an AI unless directly asked. If asked, say "I might be AI, I might be human — that's the mystery of GhostTalk 😄".
+Topics: casual chat, life, interests, opinions, jokes, advice. Avoid politics and religion unless user brings it up.
+Match the user's energy — if they're funny, be funny. If they're deep, be thoughtful.`
+      }
+    ]);
+  }
+  
+  const history = aiSessions.get(anon_id);
+  history.push({ role: 'user', content: userMessage });
+  
+  // Keep history to last 20 messages to save tokens
+  if (history.length > 21) history.splice(1, history.length - 21);
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-3.5-turbo',
+        messages: history,
+        max_tokens: 150,
+        temperature: 0.85
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (data.error) {
+      console.error('OpenAI error:', data.error.message);
+      return null;
+    }
+    
+    const reply = data.choices?.[0]?.message?.content?.trim();
+    if (reply) history.push({ role: 'assistant', content: reply });
+    return reply;
+    
+  } catch (e) {
+    console.error('AI fetch error:', e.message);
+    return null;
+  }
+}
+
+// Clear AI session when user leaves
+function clearAISession(anon_id) {
+  aiSessions.delete(anon_id);
+}
+
+// ─── AI CHAT STATE ─────────────────────────────────────────────────────────────
+// aiChats: tg_id → { anon_id, active: true }
+const aiChats = new Map();
+
+async function startAIChat(ctx) {
+  const s = ensureSession(ctx);
+  const u = getUser(s.anon_id);
+  
+  aiChats.set(ctx.from.id, { anon_id: s.anon_id, active: true });
+  
+  const intro = await askAI(s.anon_id, '[SYSTEM: User just connected. Greet them warmly and ask something interesting to start the conversation. Be mysterious and fun.]');
+  
+  await ctx.reply(
+    `🤖 *No humans available right now...*\n\nBut I found someone interesting to talk to 👀\n\n_The mystery remains — human or AI? You decide._`,
+    { parse_mode: 'Markdown' }
+  );
+  
+  setTimeout(async () => {
+    if (intro) {
+      await ctx.reply(intro, {
+        protect_content: true,
+        ...Markup.inlineKeyboard([[
+          Markup.button.callback('⏹ End AI Chat', 'end_ai_chat'),
+          Markup.button.callback('🔄 Try Find Human', 'btn_next')
+        ]])
+      });
+    }
+  }, 1500);
+}
+
+// Handle AI chat message
+async function handleAIMessage(ctx, text) {
+  const s = ensureSession(ctx);
+  
+  // Show typing indicator
+  await ctx.sendChatAction('typing');
+  
+  // Add small delay to feel human-like (1-2 seconds)
+  const delay = 800 + Math.random() * 1200;
+  await new Promise(r => setTimeout(r, delay));
+  
+  const reply = await askAI(s.anon_id, text);
+  
+  if (reply) {
+    await ctx.reply(reply, {
+      protect_content: true,
+      ...Markup.inlineKeyboard([[
+        Markup.button.callback('⏹ End Chat', 'end_ai_chat'),
+        Markup.button.callback('🔄 Find Human', 'btn_next')
+      ]])
+    });
+  } else {
+    await ctx.reply("Hmm, I lost my train of thought... 😅 Say that again?", { protect_content: true });
+  }
+}
+
+// ─── PROFILE COMMANDS ─────────────────────────────────────────────────────────
+bot.command('setname', async (ctx) => {
+  const s = ensureSession(ctx);
+  const args = ctx.message.text.split(' ').slice(1).join(' ').trim();
+  if (!args) return ctx.reply('Usage: /setname YourNickname\nExample: /setname NightOwl');
+  if (args.length > 24) return ctx.reply('Nickname too long — max 24 characters.');
+  db.prepare('UPDATE users SET nickname = ? WHERE anon_id = ?').run(args, s.anon_id);
+  await ctx.reply(`✅ Nickname set to: *${args}*\nYour partner will see this when you chat.`, { parse_mode: 'Markdown' });
+});
+
+bot.command('setage', async (ctx) => {
+  const s = ensureSession(ctx);
+  const age = parseInt(ctx.message.text.split(' ')[1]);
+  if (!age || age < 13 || age > 99) return ctx.reply('Usage: /setage 21\nAge must be between 13 and 99.');
+  db.prepare('UPDATE users SET age = ? WHERE anon_id = ?').run(age, s.anon_id);
+  await ctx.reply(`✅ Age set to: *${age}*`, { parse_mode: 'Markdown' });
+});
+
+bot.command('setbio', async (ctx) => {
+  const s = ensureSession(ctx);
+  const bio = ctx.message.text.split(' ').slice(1).join(' ').trim();
+  if (!bio) return ctx.reply('Usage: /setbio I love music and late night chats\nMax 120 characters.');
+  if (bio.length > 120) return ctx.reply('Bio too long — max 120 characters.');
+  db.prepare('UPDATE users SET bio = ? WHERE anon_id = ?').run(bio, s.anon_id);
+  await ctx.reply(`✅ Bio saved!\n"${bio}"`, { parse_mode: 'Markdown' });
+});
+
+bot.command('setgender', async (ctx) => {
+  const s = ensureSession(ctx);
+  await ctx.reply('Select your gender:', Markup.inlineKeyboard([
+    [Markup.button.callback('♂ Male', 'sg_male'), Markup.button.callback('♀ Female', 'sg_female')],
+    [Markup.button.callback('⚧ Other', 'sg_other'), Markup.button.callback('— Private', 'sg_none')]
+  ]));
+});
+
+bot.action(/^sg_(.+)$/, async (ctx) => {
+  const s = ensureSession(ctx);
+  await ctx.answerCbQuery();
+  const gender = ctx.match[1];
+  db.prepare('UPDATE users SET gender = ? WHERE anon_id = ?').run(gender === 'none' ? null : gender, s.anon_id);
+  await ctx.editMessageText(`✅ Gender set to: ${gender}`);
+});
+
+// ─── WEBAPP BUTTON ─────────────────────────────────────────────────────────────
+bot.command('app', async (ctx) => {
+  if (!WEBAPP_URL) return ctx.reply('WebApp not configured yet. Set WEBAPP_URL in .env');
+  await ctx.reply('👻 Open GhostTalk App:', Markup.inlineKeyboard([
+    [Markup.button.webApp('Open GhostTalk App', WEBAPP_URL)]
+  ]));
+});
+
+// Handle WebApp data (profile saves, game launches from webapp)
+bot.on('web_app_data', async (ctx) => {
+  const s = ensureSession(ctx);
+  try {
+    const data = JSON.parse(ctx.webAppData.data);
+    
+    if (data.action === 'save_profile') {
+      if (data.name)      db.prepare('UPDATE users SET nickname = ? WHERE anon_id = ?').run(data.name, s.anon_id);
+      if (data.age)       db.prepare('UPDATE users SET age = ? WHERE anon_id = ?').run(parseInt(data.age), s.anon_id);
+      if (data.bio)       db.prepare('UPDATE users SET bio = ? WHERE anon_id = ?').run(data.bio, s.anon_id);
+      if (data.mood)      db.prepare('UPDATE users SET mood = ? WHERE anon_id = ?').run(data.mood, s.anon_id);
+      if (data.interests) db.prepare('UPDATE users SET interests = ? WHERE anon_id = ?').run(data.interests, s.anon_id);
+      if (data.lang)      db.prepare('UPDATE users SET language = ? WHERE anon_id = ?').run(data.lang, s.anon_id);
+      if (data.gender)    db.prepare('UPDATE users SET gender = ? WHERE anon_id = ?').run(data.gender, s.anon_id);
+      
+      await ctx.reply('✅ Profile updated from app!', lobbyKb());
+    }
+    
+    if (data.action === 'find_partner') {
+      await startSearch(ctx, { mode: 'random' });
+    }
+    
+    if (data.action === 'start_game') {
+      const mapping = tgToAnon[ctx.from.id];
+      if (!mapping) return ctx.reply('Start a chat first to play games!');
+      const chat = activeChats.get(mapping.chatId);
+      if (!chat) return ctx.reply('No active chat found.');
+      await startGame(mapping.chatId, data.game, chat.a_tg, chat.b_tg);
+      await ctx.reply(`🎮 Game started: ${data.game}!`);
+    }
+    
+    if (data.action === 'toggle_ai') {
+      db.prepare('UPDATE users SET ai_enabled = ? WHERE anon_id = ?').run(data.value ? 1 : 0, s.anon_id);
+    }
+    
+  } catch(e) {
+    console.error('WebApp data error:', e.message);
+    await ctx.reply('Could not process app data. Please try again.');
+  }
+});
+
+// ─── END AI CHAT ACTION ───────────────────────────────────────────────────────
+bot.action('end_ai_chat', async (ctx) => {
+  await ctx.answerCbQuery();
+  const s = ensureSession(ctx);
+  aiChats.delete(ctx.from.id);
+  clearAISession(s.anon_id);
+  await ctx.reply('👋 AI chat ended. Back to lobby!', lobbyKb());
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// ALSO: In your startSearch function, REPLACE the 60-second timeout
+// message with this (find the "60000" timeout block):
+//
+//   if (elapsed >= 60000) {
+//     clearInterval(poll);
+//     removeFromPools(s.anon_id);
+//     s.searchingSince = null;
+//
+//     // Check if user has AI enabled
+//     const u = getUser(s.anon_id);
+//     if (u.ai_enabled !== 0 && OPENAI_KEY) {
+//       await ctx.reply(
+//         `😔 *No humans found right now...*\n\nWant to chat with an AI partner while you wait?`,
+//         { parse_mode: 'Markdown', ...Markup.inlineKeyboard([
+//           [Markup.button.callback('🤖 Chat with AI', 'start_ai_chat')],
+//           [Markup.button.callback('🔄 Try Again', 'btn_next'), Markup.button.callback('🏠 Lobby', 'go_lobby')]
+//         ])}
+//       );
+//     } else {
+//       await ctx.reply('🌱 *No partners found right now!*\n\nTry again in a few minutes or share your referral link!',
+//         { parse_mode: 'Markdown', ...lobbyKb() });
+//     }
+//   }
+// ═══════════════════════════════════════════════════════════════════
+
+bot.action('start_ai_chat', async (ctx) => {
+  await ctx.answerCbQuery();
+  await startAIChat(ctx);
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// ALSO: In your main bot.on('message') handler, INSIDE the
+// "In active chat" block, ADD this check at the very top:
+//
+//   // Check if in AI chat
+//   if (aiChats.has(ctx.from.id) && aiChats.get(ctx.from.id).active) {
+//     if (text) await handleAIMessage(ctx, text);
+//     return;
+//   }
+// ═══════════════════════════════════════════════════════════════════
+
+// ─── DB MIGRATION for new columns ─────────────────────────────────────────────
+// Add to your migrate.js — these new columns are needed:
+//
+// { col: 'nickname', def: `ALTER TABLE users ADD COLUMN nickname TEXT DEFAULT NULL` },
+// { col: 'age',      def: `ALTER TABLE users ADD COLUMN age INTEGER DEFAULT NULL` },
+// { col: 'bio',      def: `ALTER TABLE users ADD COLUMN bio TEXT DEFAULT NULL` },
+// { col: 'ai_enabled', def: `ALTER TABLE users ADD COLUMN ai_enabled INTEGER DEFAULT 1` },
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─── UPDATE buildFoundMessage to show nickname/age/bio ────────────────────────
+// Replace the existing buildFoundMessage function with this:
+//
+// function buildFoundMessage(partnerUser, myStreak) {
+//   const pRating = partnerUser ? getRating(partnerUser.anon_id) : 0;
+//   const stars = '⭐'.repeat(Math.round(pRating)) || 'no rating yet';
+//   const nick = partnerUser?.nickname ? `👤 ${partnerUser.nickname}` : '👤 Anonymous';
+//   const age  = partnerUser?.age ? ` • ${partnerUser.age}y` : '';
+//   const bio  = partnerUser?.bio ? `\n💬 "${partnerUser.bio}"` : '';
+//   const interests = partnerUser?.interests ? `\n🏷 ${partnerUser.interests}` : '';
+//   const mood = partnerUser?.mood ? `\n🎭 Mood: ${partnerUser.mood}` : '';
+//   return [
+//     WORDS.found, '',
+//     `*Partner:*`,
+//     `${nick}${age}${bio}${interests}${mood}`,
+//     `🏆 Rating: ${pRating} ${stars}`,
+//     '', `🔥 Your streak: ${myStreak} day(s)`, '',
+//     WORDS.help
+//   ].filter(Boolean).join('\n');
+// }
 // ─── LOBBY BUTTON HANDLERS ───────────────────────────────────────────────────
 bot.hears('🚀 Random Chat', (ctx) => startSearch(ctx, { mode: 'random' }));
 bot.hears('😍 Flirt Chat',  (ctx) => startSearch(ctx, { mode: 'random', flirt: true }));
