@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<title>GhostTalk</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface2: #1a1a26;
+    --border: rgba(255,255,255,0.08);
+    --accent: #7c6fff;
+    --accent2: #ff6b9d;
+    --accent3: #6bffb8;
+    --text: #f0f0f8;
+    --muted: rgba(240,240,248,0.45);
+    --radius: 16px;
+    --radius-sm: 10px;
+  }
+  [data-theme="light"] {
+    --bg: #f4f3ff;
+    --surface: #ffffff;
+    --surface2: #eeecff;
+    --border: rgba(0,0,0,0.08);
+    --accent: #5b4fff;
+    --accent2: #e0457f;
+    --accent3: #1a9e6a;
+    --text: #0a0a1a;
+    --muted: rgba(10,10,26,0.45);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; overflow-x: hidden; }
+
+  .app { display: flex; flex-direction: column; height: 100vh; max-width: 430px; margin: 0 auto; }
+
+  /* TOP NAV */
+  .topnav { display: flex; align-items: center; padding: 14px 18px 0; gap: 0; border-bottom: 1px solid var(--border); background: var(--bg); position: sticky; top: 0; z-index: 10; }
+  .tab { flex: 1; text-align: center; padding: 10px 4px 12px; font-family: 'Syne', sans-serif; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* SCREENS */
+  .screen { display: none; flex: 1; overflow-y: auto; padding: 20px 18px 100px; }
+  .screen.active { display: block; }
+
+  /* HERO */
+  .hero { text-align: center; padding: 24px 0 20px; }
+  .ghost-avatar { width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent2)); display: flex; align-items: center; justify-content: center; font-size: 36px; margin: 0 auto 14px; box-shadow: 0 0 40px rgba(124,111,255,0.3); }
+  .hero h1 { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 800; margin-bottom: 4px; }
+  .hero p { font-size: 13px; color: var(--muted); }
+
+  /* STATS ROW */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 16px 0; }
+  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 6px; text-align: center; }
+  .stat-val { font-family: 'Syne', sans-serif; font-size: 18px; font-weight: 700; color: var(--text); }
+  .stat-lbl { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px; }
+
+  /* FORM ELEMENTS */
+  .section-label { font-family: 'Syne', sans-serif; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin: 20px 0 10px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .field input, .field textarea, .field select {
+    width: 100%; background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 12px 14px; color: var(--text);
+    font-family: 'DM Sans', sans-serif; font-size: 14px; outline: none;
+    transition: border-color 0.2s;
+  }
+  .field input:focus, .field textarea:focus, .field select:focus { border-color: var(--accent); }
+  .field textarea { resize: none; height: 80px; }
+  .field select option { background: var(--surface); }
+
+  /* TAGS */
+  .tags { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tag { padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 500; border: 1px solid var(--border); color: var(--muted); cursor: pointer; transition: all 0.15s; background: var(--surface); user-select: none; }
+  .tag.on { border-color: var(--accent); color: var(--accent); background: rgba(124,111,255,0.1); }
+  .tag.max-warn { animation: shake 0.3s; }
+
+  /* MOOD PILLS */
+  .moods { display: flex; flex-wrap: wrap; gap: 8px; }
+  .mood { padding: 8px 16px; border-radius: 20px; font-size: 13px; border: 1px solid var(--border); cursor: pointer; transition: all 0.15s; background: var(--surface); color: var(--muted); }
+  .mood.on { border-color: var(--accent2); color: var(--accent2); background: rgba(255,107,157,0.1); }
+
+  /* GENDER */
+  .gender-row { display: flex; gap: 10px; }
+  .gender-btn { flex: 1; padding: 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface); color: var(--muted); font-size: 13px; cursor: pointer; text-align: center; transition: all 0.15s; }
+  .gender-btn.on { border-color: var(--accent3); color: var(--accent3); background: rgba(107,255,184,0.1); }
+
+  /* PRIMARY BUTTON */
+  .btn-primary { width: 100%; padding: 15px; border-radius: var(--radius); background: linear-gradient(135deg, var(--accent), var(--accent2)); color: white; font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 700; border: none; cursor: pointer; letter-spacing: 0.04em; transition: opacity 0.15s, transform 0.1s; }
+  .btn-primary:active { transform: scale(0.98); opacity: 0.9; }
+  .btn-secondary { width: 100%; padding: 13px; border-radius: var(--radius); background: transparent; color: var(--accent); font-family: 'Syne', sans-serif; font-size: 14px; font-weight: 600; border: 1px solid var(--accent); cursor: pointer; transition: all 0.15s; margin-top: 10px; }
+  .btn-secondary:active { background: rgba(124,111,255,0.1); }
+
+  /* REFERRAL BOX */
+  .ref-box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; display: flex; align-items: center; gap: 12px; }
+  .ref-link { font-size: 12px; color: var(--muted); font-family: monospace; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .copy-btn { padding: 6px 14px; border-radius: 8px; background: var(--accent); color: white; font-size: 12px; font-weight: 600; border: none; cursor: pointer; flex-shrink: 0; }
+
+  /* GAMES GRID */
+  .games-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .game-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 14px; cursor: pointer; transition: border-color 0.15s, transform 0.1s; }
+  .game-card:active { transform: scale(0.97); }
+  .game-card:hover { border-color: var(--accent); }
+  .game-emoji { font-size: 32px; margin-bottom: 10px; }
+  .game-name { font-family: 'Syne', sans-serif; font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+  .game-sub { font-size: 11px; color: var(--muted); }
+  .game-badge { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 6px; background: rgba(107,255,184,0.15); color: var(--accent3); font-weight: 600; margin-top: 8px; }
+  .game-badge.soon { background: rgba(255,255,255,0.05); color: var(--muted); }
+
+  /* LEADERBOARD */
+  .lb-row { display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 8px; }
+  .lb-rank { font-family: 'Syne', sans-serif; font-size: 16px; font-weight: 800; width: 28px; text-align: center; flex-shrink: 0; }
+  .lb-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--surface2); display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+  .lb-name { font-size: 13px; font-weight: 500; flex: 1; }
+  .lb-stat { font-size: 11px; color: var(--muted); }
+  .lb-score { font-family: 'Syne', sans-serif; font-size: 14px; font-weight: 700; color: var(--accent); }
+
+  /* SUCCESS TOAST */
+  .toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%) translateY(20px); background: var(--accent3); color: #0a1a12; padding: 10px 20px; border-radius: 20px; font-size: 13px; font-weight: 600; opacity: 0; transition: all 0.3s; pointer-events: none; z-index: 100; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* BOTTOM NAV */
+  .bottomnav { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 430px; background: var(--bg); border-top: 1px solid var(--border); display: flex; padding: 8px 0 20px; z-index: 10; }
+  .bnav-btn { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; padding: 6px 0; }
+  .bnav-icon { font-size: 20px; }
+  .bnav-lbl { font-size: 9px; font-weight: 600; font-family: 'Syne', sans-serif; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+  .bnav-btn.active .bnav-lbl { color: var(--accent); }
+  .bnav-btn.active .bnav-icon { filter: drop-shadow(0 0 6px var(--accent)); }
+
+  @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-4px)} 75%{transform:translateX(4px)} }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+  .screen.active { animation: fadeIn 0.25s ease; }
+
+  /* STREAK BANNER */
+  .streak-banner { background: linear-gradient(135deg, rgba(124,111,255,0.15), rgba(255,107,157,0.15)); border: 1px solid rgba(124,111,255,0.25); border-radius: var(--radius); padding: 14px 16px; display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .streak-num { font-family: 'Syne', sans-serif; font-size: 28px; font-weight: 800; color: var(--accent); }
+  .streak-text { font-size: 13px; color: var(--muted); }
+  .streak-text strong { color: var(--text); display: block; font-size: 14px; }
+
+  /* AI STATUS */
+  .ai-status { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .ai-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent3); box-shadow: 0 0 8px var(--accent3); flex-shrink: 0; }
+  .ai-dot.off { background: var(--muted); box-shadow: none; }
+  .ai-label { font-size: 13px; flex: 1; }
+  .ai-toggle { width: 44px; height: 24px; border-radius: 12px; border: none; cursor: pointer; position: relative; transition: background 0.2s; flex-shrink: 0; }
+  .ai-toggle.on { background: var(--accent3); }
+  .ai-toggle.off { background: var(--border); }
+  .ai-toggle::after { content: ''; position: absolute; width: 18px; height: 18px; border-radius: 50%; background: white; top: 3px; transition: left 0.2s; }
+  .ai-toggle.on::after { left: 23px; }
+  .ai-toggle.off::after { left: 3px; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- TOP TABS -->
+  <div class="topnav">
+    <div class="tab active" onclick="goScreen('home',this)">Home</div>
+    <div class="tab" onclick="goScreen('profile',this)">Profile</div>
+    <div class="tab" onclick="goScreen('games',this)">Games</div>
+    <div class="tab" onclick="goScreen('leaderboard',this)">Ranks</div>
+  </div>
+
+  <!-- ═══ HOME ═══ -->
+  <div class="screen active" id="screen-home">
+    <div class="hero">
+      <div class="ghost-avatar">👻</div>
+      <h1>GhostTalk</h1>
+      <p>Anonymous chats • Real connections</p>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="stat-val" id="s-chats">42</div><div class="stat-lbl">Chats</div></div>
+      <div class="stat"><div class="stat-val" id="s-msgs">318</div><div class="stat-lbl">Messages</div></div>
+      <div class="stat"><div class="stat-val" id="s-streak">7</div><div class="stat-lbl">Streak</div></div>
+      <div class="stat"><div class="stat-val" id="s-rating">4.2</div><div class="stat-lbl">Rating</div></div>
+    </div>
+
+    <div class="streak-banner">
+      <div class="streak-num" id="streak-big">7</div>
+      <div class="streak-text"><strong>Day streak!</strong>Keep chatting daily to keep it going.</div>
+    </div>
+
+    <!-- AI Fallback toggle -->
+    <div class="section-label">AI Partner</div>
+    <div class="ai-status">
+      <div class="ai-dot on" id="ai-dot"></div>
+      <div class="ai-label">
+        <strong style="font-size:13px;display:block;">AI Fallback</strong>
+        <span style="font-size:11px;color:var(--muted)">Chat with AI when no humans available</span>
+      </div>
+      <button class="ai-toggle on" id="ai-toggle" onclick="toggleAI()"></button>
+    </div>
+
+    <div class="section-label">Referral link</div>
+    <div class="ref-box">
+      <span class="ref-link" id="ref-link">t.me/IamDinkyBot?start=ref_A3F9C2</span>
+      <button class="copy-btn" onclick="copyRef()">Copy</button>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px;text-align:center">👥 <span id="ref-count">3</span> friends referred • Every 3 = +1 VIP day</div>
+
+    <div style="margin-top:20px">
+      <button class="btn-primary" onclick="openChat()">Find a Partner</button>
+      <button class="btn-secondary" onclick="goScreen('profile', document.querySelectorAll('.tab')[1])">Edit Profile</button>
+    </div>
+  </div>
+
+  <!-- ═══ PROFILE ═══ -->
+  <div class="screen" id="screen-profile">
+    <div class="section-label">Identity</div>
+
+    <div class="field">
+      <label>Nickname (shown to partner, not your real name)</label>
+      <input type="text" id="f-name" placeholder="e.g. Night Owl, Stardust, CuriousMind..." maxlength="24"/>
+    </div>
+    <div class="field">
+      <label>Age (optional)</label>
+      <input type="number" id="f-age" placeholder="e.g. 21" min="13" max="99"/>
+    </div>
+    <div class="field">
+      <label>Bio (shown to partner before chat)</label>
+      <textarea id="f-bio" placeholder="Write something mysterious... Who are you without your name?"></textarea>
+    </div>
+
+    <div class="section-label">Gender</div>
+    <div class="gender-row" id="gender-row">
+      <div class="gender-btn" onclick="setGender(this,'male')">♂ Male</div>
+      <div class="gender-btn" onclick="setGender(this,'female')">♀ Female</div>
+      <div class="gender-btn" onclick="setGender(this,'other')">⚧ Other</div>
+      <div class="gender-btn" onclick="setGender(this,'none')">— Private</div>
+    </div>
+
+    <div class="section-label">Mood right now</div>
+    <div class="moods" id="moods">
+      <div class="mood" onclick="setMood(this)">😊 Happy</div>
+      <div class="mood" onclick="setMood(this)">😔 Sad</div>
+      <div class="mood" onclick="setMood(this)">🤔 Philosophical</div>
+      <div class="mood on" onclick="setMood(this)">😎 Chill</div>
+      <div class="mood" onclick="setMood(this)">🔥 Flirty</div>
+      <div class="mood" onclick="setMood(this)">😂 Funny</div>
+      <div class="mood" onclick="setMood(this)">💪 Motivated</div>
+    </div>
+
+    <div class="section-label">Interests <span style="color:var(--muted);font-weight:400;font-size:10px">(pick up to 5)</span></div>
+    <div class="tags" id="tags">
+      <div class="tag on" onclick="toggleTag(this)">🎵 Music</div>
+      <div class="tag on" onclick="toggleTag(this)">🎮 Gaming</div>
+      <div class="tag" onclick="toggleTag(this)">📚 Books</div>
+      <div class="tag" onclick="toggleTag(this)">💻 Tech</div>
+      <div class="tag on" onclick="toggleTag(this)">🎬 Movies</div>
+      <div class="tag" onclick="toggleTag(this)">🏋️ Fitness</div>
+      <div class="tag" onclick="toggleTag(this)">🎨 Art</div>
+      <div class="tag" onclick="toggleTag(this)">✈️ Travel</div>
+      <div class="tag" onclick="toggleTag(this)">🍕 Food</div>
+      <div class="tag" onclick="toggleTag(this)">💰 Crypto</div>
+      <div class="tag" onclick="toggleTag(this)">🌿 Nature</div>
+      <div class="tag" onclick="toggleTag(this)">🧠 Philosophy</div>
+    </div>
+
+    <div class="section-label">Language preference</div>
+    <div class="field">
+      <select id="f-lang">
+        <option value="any">Any language</option>
+        <option value="english">English</option>
+        <option value="hindi">Hindi</option>
+        <option value="spanish">Spanish</option>
+        <option value="arabic">Arabic</option>
+        <option value="russian">Russian</option>
+        <option value="french">French</option>
+      </select>
+    </div>
+
+    <div style="margin-top:8px">
+      <button class="btn-primary" onclick="saveProfile()">Save Profile</button>
+    </div>
+  </div>
+
+  <!-- ═══ GAMES ═══ -->
+  <div class="screen" id="screen-games">
+    <div class="section-label">Play with your partner</div>
+    <div class="games-grid">
+      <div class="game-card" onclick="launchGame('trivia')">
+        <div class="game-emoji">🧠</div>
+        <div class="game-name">Trivia</div>
+        <div class="game-sub">First to answer wins</div>
+        <div class="game-badge">Live</div>
+      </div>
+      <div class="game-card" onclick="launchGame('wyr')">
+        <div class="game-emoji">🤔</div>
+        <div class="game-name">Would You Rather</div>
+        <div class="game-sub">Tough dilemmas</div>
+        <div class="game-badge">Live</div>
+      </div>
+      <div class="game-card" onclick="launchGame('tod')">
+        <div class="game-emoji">🎲</div>
+        <div class="game-name">Truth or Dare</div>
+        <div class="game-sub">Classic party game</div>
+        <div class="game-badge">Live</div>
+      </div>
+      <div class="game-card" onclick="launchGame('wordchain')">
+        <div class="game-emoji">🔤</div>
+        <div class="game-name">Word Chain</div>
+        <div class="game-sub">Endless vocab game</div>
+        <div class="game-badge">Live</div>
+      </div>
+      <div class="game-card" onclick="launchGame('draw')">
+        <div class="game-emoji">🎨</div>
+        <div class="game-name">Guess Drawing</div>
+        <div class="game-sub">Draw & guess</div>
+        <div class="game-badge soon">Soon</div>
+      </div>
+      <div class="game-card" onclick="launchGame('quiz')">
+        <div class="game-emoji">🎯</div>
+        <div class="game-name">Personality Quiz</div>
+        <div class="game-sub">Know your partner</div>
+        <div class="game-badge soon">Soon</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ LEADERBOARD ═══ -->
+  <div class="screen" id="screen-leaderboard">
+    <div class="section-label">Top Chatters</div>
+    <div id="lb-list">
+      <div class="lb-row"><div class="lb-rank">🥇</div><div class="lb-avatar">👻</div><div class="lb-name">NightOwl<div class="lb-stat">💬 98 chats • 🔥 21d</div></div><div class="lb-score">4.9★</div></div>
+      <div class="lb-row"><div class="lb-rank">🥈</div><div class="lb-avatar">🌙</div><div class="lb-name">Stargazer<div class="lb-stat">💬 76 chats • 🔥 14d</div></div><div class="lb-score">4.7★</div></div>
+      <div class="lb-row"><div class="lb-rank">🥉</div><div class="lb-avatar">🔮</div><div class="lb-name">PhilosoFox<div class="lb-stat">💬 64 chats • 🔥 9d</div></div><div class="lb-score">4.6★</div></div>
+      <div class="lb-row"><div class="lb-rank" style="color:var(--muted);font-size:13px">4</div><div class="lb-avatar">⚡</div><div class="lb-name">SpeedTalker<div class="lb-stat">💬 58 chats • 🔥 7d</div></div><div class="lb-score">4.4★</div></div>
+      <div class="lb-row"><div class="lb-rank" style="color:var(--muted);font-size:13px">5</div><div class="lb-avatar">🎭</div><div class="lb-name">MaskOn<div class="lb-stat">💬 51 chats • 🔥 5d</div></div><div class="lb-score">4.2★</div></div>
+    </div>
+    <div style="margin-top:16px;text-align:center;font-size:12px;color:var(--muted)">Rankings update every hour</div>
+  </div>
+
+  <!-- BOTTOM NAV -->
+  <div class="bottomnav">
+    <div class="bnav-btn active" onclick="goScreen('home',null,this)" id="bn-home">
+      <div class="bnav-icon">🏠</div><div class="bnav-lbl">Home</div>
+    </div>
+    <div class="bnav-btn" onclick="goScreen('profile',null,this)" id="bn-profile">
+      <div class="bnav-icon">👤</div><div class="bnav-lbl">Profile</div>
+    </div>
+    <div class="bnav-btn" onclick="goScreen('games',null,this)" id="bn-games">
+      <div class="bnav-icon">🎮</div><div class="bnav-lbl">Games</div>
+    </div>
+    <div class="bnav-btn" onclick="goScreen('leaderboard',null,this)" id="bn-leaderboard">
+      <div class="bnav-icon">🏆</div><div class="bnav-lbl">Ranks</div>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+// Telegram WebApp init
+const tg = window.Telegram?.WebApp;
+if (tg) {
+  tg.ready();
+  tg.expand();
+  // Match Telegram theme
+  if (tg.colorScheme === 'light') document.documentElement.setAttribute('data-theme','light');
+}
+
+// Load saved profile from localStorage
+const saved = JSON.parse(localStorage.getItem('gt_profile') || '{}');
+if (saved.name) document.getElementById('f-name').value = saved.name;
+if (saved.age)  document.getElementById('f-age').value  = saved.age;
+if (saved.bio)  document.getElementById('f-bio').value  = saved.bio;
+if (saved.lang) document.getElementById('f-lang').value = saved.lang;
+if (saved.gender) {
+  document.querySelectorAll('.gender-btn').forEach(b => {
+    if (b.textContent.includes(saved.gender)) b.classList.add('on');
+  });
+}
+if (saved.mood) {
+  document.querySelectorAll('.mood').forEach(m => {
+    m.classList.toggle('on', m.textContent.includes(saved.mood));
+  });
+}
+if (saved.interests) {
+  const ints = saved.interests.split(',');
+  document.querySelectorAll('.tag').forEach(t => {
+    t.classList.toggle('on', ints.some(i => t.textContent.includes(i)));
+  });
+}
+if (saved.aiEnabled === false) {
+  document.getElementById('ai-toggle').className = 'ai-toggle off';
+  document.getElementById('ai-dot').className = 'ai-dot off';
+}
+
+// Screen switching
+let activeTab = null;
+function goScreen(name, tabEl, bnEl) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById('screen-' + name).classList.add('active');
+  // top tabs
+  if (tabEl) { document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active')); tabEl.classList.add('active'); }
+  // bottom nav
+  if (bnEl) { document.querySelectorAll('.bnav-btn').forEach(b=>b.classList.remove('active')); bnEl.classList.add('active'); }
+}
+
+// Tag toggle (max 5)
+function toggleTag(el) {
+  const selected = document.querySelectorAll('#tags .tag.on');
+  if (el.classList.contains('on')) { el.classList.remove('on'); return; }
+  if (selected.length >= 5) { el.classList.add('max-warn'); setTimeout(()=>el.classList.remove('max-warn'),400); showToast('Max 5 interests!'); return; }
+  el.classList.add('on');
+}
+
+// Mood
+function setMood(el) {
+  document.querySelectorAll('.mood').forEach(m=>m.classList.remove('on'));
+  el.classList.add('on');
+}
+
+// Gender
+function setGender(el, val) {
+  document.querySelectorAll('.gender-btn').forEach(b=>b.classList.remove('on'));
+  el.classList.add('on');
+}
+
+// AI Toggle
+function toggleAI() {
+  const btn = document.getElementById('ai-toggle');
+  const dot = document.getElementById('ai-dot');
+  const isOn = btn.classList.contains('on');
+  btn.className = 'ai-toggle ' + (isOn ? 'off' : 'on');
+  dot.className = 'ai-dot ' + (isOn ? 'off' : 'on');
+  showToast(isOn ? 'AI fallback disabled' : 'AI fallback enabled!');
+  const p = JSON.parse(localStorage.getItem('gt_profile')||'{}');
+  p.aiEnabled = !isOn;
+  localStorage.setItem('gt_profile', JSON.stringify(p));
+  if (tg) tg.sendData(JSON.stringify({ action: 'toggle_ai', value: !isOn }));
+}
+
+// Save profile
+function saveProfile() {
+  const name = document.getElementById('f-name').value.trim();
+  const age  = document.getElementById('f-age').value.trim();
+  const bio  = document.getElementById('f-bio').value.trim();
+  const lang = document.getElementById('f-lang').value;
+  const mood = document.querySelector('.mood.on')?.textContent.replace(/^[^\w]*/,'').trim() || '';
+  const gender = document.querySelector('.gender-btn.on')?.textContent.trim() || '';
+  const interests = [...document.querySelectorAll('#tags .tag.on')]
+    .map(t => t.textContent.replace(/^[^\w]*/,'').trim()).join(',');
+
+  const profile = { name, age, bio, lang, mood, gender, interests, aiEnabled: document.getElementById('ai-toggle').classList.contains('on') };
+  localStorage.setItem('gt_profile', JSON.stringify(profile));
+
+  // Send to bot via Telegram WebApp
+  if (tg) {
+    tg.sendData(JSON.stringify({ action: 'save_profile', ...profile }));
+  }
+  showToast('Profile saved!');
+}
+
+// Copy referral
+function copyRef() {
+  const link = document.getElementById('ref-link').textContent;
+  navigator.clipboard?.writeText(link).catch(()=>{});
+  showToast('Link copied!');
+}
+
+// Open chat (closes webapp, sends command)
+function openChat() {
+  if (tg) {
+    tg.sendData(JSON.stringify({ action: 'find_partner' }));
+    tg.close();
+  } else {
+    showToast('Open in Telegram to chat!');
+  }
+}
+
+// Launch game
+function launchGame(game) {
+  const soon = ['draw','quiz'];
+  if (soon.includes(game)) { showToast('Coming soon!'); return; }
+  if (tg) {
+    tg.sendData(JSON.stringify({ action: 'start_game', game }));
+    tg.close();
+  } else {
+    showToast('Open in Telegram!');
+  }
+}
+
+// Toast notification
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2000);
+}
+</script>
+</body>
+</html>

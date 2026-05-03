@@ -1,17 +1,9 @@
 /**
- * anonymtalks-bot-v2.js
- * AnonymTalks — Anonymous 1:1 Chat Telegram Bot
- * Enhanced Version with: Interest Matching, Moods, Mini-Games, Media Forwarding,
- * Streaks, Referral System, Language Filter, Admin Dashboard, Anti-spam, VIP Tiers
- *
- * Install:
- *   npm install telegraf sql.js dotenv
- * Run:
- *   BOT_TOKEN="..." ADMIN_IDS="123456,789012" node anonymtalks-bot-v2.js
+ * anonymtalks-bot.js
+ * GhostTalk — Anonymous 1:1 Chat Telegram Bot v2
  */
 
 require('dotenv').config();
-
 
 // START EXPRESS IMMEDIATELY so Render detects port right away
 const express = require('express');
@@ -22,19 +14,21 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.listen(PORT, '0.0.0.0', () => console.log('🌐 Web server on port ' + PORT));
 
 const { Telegraf, Markup, session } = require('telegraf');
-const fs   = require('fs');
+const fs     = require('fs');
 const crypto = require('crypto');
 const initSqlJs = require('sql.js');
 
-// ─── CONFIG ────────────────────────────────────────────────────────────────────
-const BOT_TOKEN  = process.env.BOT_TOKEN;
-const ADMIN_IDS  = (process.env.ADMIN_IDS || '').split(',').map(x => parseInt(x)).filter(Boolean);
-const DB_FILE    = process.env.DB_FILE || './anonymtalks.db';
-const BOT_USERNAME = process.env.BOT_USERNAME || 'AnonymTalksBot'; // set this!
+// ─── CONFIG ───────────────────────────────────────────────────────────────────
+const BOT_TOKEN    = process.env.BOT_TOKEN;
+const ADMIN_IDS    = (process.env.ADMIN_IDS || '').split(',').map(x => parseInt(x)).filter(Boolean);
+const DB_FILE      = process.env.DB_FILE      || './anonymtalks.db';
+const BOT_USERNAME = process.env.BOT_USERNAME || 'GhostTalkBot';
+const WEBAPP_URL   = process.env.WEBAPP_URL   || '';
+const OPENAI_KEY   = process.env.OPENAI_API_KEY || '';
 
 if (!BOT_TOKEN) { console.error('Set BOT_TOKEN env var'); process.exit(1); }
 
-// ─── DATABASE ──────────────────────────────────────────────────────────────────
+// ─── DATABASE ─────────────────────────────────────────────────────────────────
 class Database {
   constructor(filename) { this.filename = filename; this.db = null; }
 
@@ -64,7 +58,7 @@ class Database {
 
 let db = null;
 
-// ─── INIT DB SCHEMA ────────────────────────────────────────────────────────────
+// ─── INIT DB SCHEMA ───────────────────────────────────────────────────────────
 async function initDB() {
   db = new Database(DB_FILE);
   await db.init();
@@ -72,27 +66,31 @@ async function initDB() {
   const exec = (sql) => db.prepare(sql).run();
 
   exec(`CREATE TABLE IF NOT EXISTS users (
-    anon_id        TEXT PRIMARY KEY,
-    rating_sum     INTEGER DEFAULT 0,
-    rating_count   INTEGER DEFAULT 0,
-    interests      TEXT DEFAULT NULL,
-    mood           TEXT DEFAULT NULL,
-    language       TEXT DEFAULT 'any',
-    gender         TEXT DEFAULT NULL,
-    premium        INTEGER DEFAULT 0,
-    vip_tier       INTEGER DEFAULT 0,
+    anon_id         TEXT PRIMARY KEY,
+    rating_sum      INTEGER DEFAULT 0,
+    rating_count    INTEGER DEFAULT 0,
+    interests       TEXT DEFAULT NULL,
+    mood            TEXT DEFAULT NULL,
+    language        TEXT DEFAULT 'any',
+    gender          TEXT DEFAULT NULL,
+    premium         INTEGER DEFAULT 0,
+    vip_tier        INTEGER DEFAULT 0,
     last_bonus_date TEXT DEFAULT NULL,
-    chat_count     INTEGER DEFAULT 0,
-    streak_days    INTEGER DEFAULT 0,
-    last_chat_date TEXT DEFAULT NULL,
-    total_messages INTEGER DEFAULT 0,
-    referral_code  TEXT DEFAULT NULL,
-    referred_by    TEXT DEFAULT NULL,
-    referral_count INTEGER DEFAULT 0,
-    banned         INTEGER DEFAULT 0,
-    ban_reason     TEXT DEFAULT NULL,
-    created_at     TEXT DEFAULT (datetime('now')),
-    country        TEXT DEFAULT NULL
+    chat_count      INTEGER DEFAULT 0,
+    streak_days     INTEGER DEFAULT 0,
+    last_chat_date  TEXT DEFAULT NULL,
+    total_messages  INTEGER DEFAULT 0,
+    referral_code   TEXT DEFAULT NULL,
+    referred_by     TEXT DEFAULT NULL,
+    referral_count  INTEGER DEFAULT 0,
+    banned          INTEGER DEFAULT 0,
+    ban_reason      TEXT DEFAULT NULL,
+    created_at      TEXT DEFAULT (datetime('now')),
+    country         TEXT DEFAULT NULL,
+    nickname        TEXT DEFAULT NULL,
+    age             INTEGER DEFAULT NULL,
+    bio             TEXT DEFAULT NULL,
+    ai_enabled      INTEGER DEFAULT 1
   )`);
 
   exec(`CREATE TABLE IF NOT EXISTS complaints (
@@ -107,20 +105,20 @@ async function initDB() {
   )`);
 
   exec(`CREATE TABLE IF NOT EXISTS chat_logs (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    chat_id     TEXT,
-    anon_a      TEXT,
-    anon_b      TEXT,
-    started_at  TEXT,
-    ended_at    TEXT,
-    msg_count   INTEGER DEFAULT 0,
-    end_reason  TEXT
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id    TEXT,
+    anon_a     TEXT,
+    anon_b     TEXT,
+    started_at TEXT,
+    ended_at   TEXT,
+    msg_count  INTEGER DEFAULT 0,
+    end_reason TEXT
   )`);
 
   exec(`CREATE TABLE IF NOT EXISTS referrals (
-    code        TEXT PRIMARY KEY,
-    owner_anon  TEXT,
-    used_count  INTEGER DEFAULT 0
+    code       TEXT PRIMARY KEY,
+    owner_anon TEXT,
+    used_count INTEGER DEFAULT 0
   )`);
 
   exec(`CREATE TABLE IF NOT EXISTS bot_stats (
@@ -128,15 +126,14 @@ async function initDB() {
     value INTEGER DEFAULT 0
   )`);
 
-  // seed stats
   ['total_users','total_chats','active_users_today'].forEach(k => {
     const r = db.prepare('SELECT key FROM bot_stats WHERE key = ?').get(k);
     if (!r) db.prepare('INSERT INTO bot_stats(key,value) VALUES(?,0)').run(k);
   });
 }
 
-// ─── DB HELPERS ────────────────────────────────────────────────────────────────
-const makeAnonId = () => crypto.randomBytes(9).toString('hex');
+// ─── DB HELPERS ───────────────────────────────────────────────────────────────
+const makeAnonId      = () => crypto.randomBytes(9).toString('hex');
 const makeReferralCode = () => crypto.randomBytes(4).toString('hex').toUpperCase();
 
 function ensureUserRow(anon_id) {
@@ -172,7 +169,7 @@ function saveComplaint(reporter, accused, reason, excerpt, severity = 0) {
 
 function updateStreak(anon_id) {
   const u = getUser(anon_id);
-  const today = new Date().toISOString().slice(0, 10);
+  const today     = new Date().toISOString().slice(0, 10);
   const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
   let newStreak = 1;
   if (u.last_chat_date === yesterday) newStreak = (u.streak_days || 0) + 1;
@@ -183,42 +180,35 @@ function updateStreak(anon_id) {
 }
 
 function logChat(chatId, anonA, anonB, startedAt, endedAt, msgCount, endReason) {
-  db.prepare('INSERT INTO chat_logs(chat_id, anon_a, anon_b, started_at, ended_at, msg_count, end_reason) VALUES(?,?,?,?,?,?,?)')
+  db.prepare('INSERT INTO chat_logs(chat_id,anon_a,anon_b,started_at,ended_at,msg_count,end_reason) VALUES(?,?,?,?,?,?,?)')
     .run(chatId, anonA, anonB, startedAt, endedAt, msgCount, endReason);
   db.prepare("UPDATE bot_stats SET value = value + 1 WHERE key = 'total_chats'").run();
 }
 
-// ─── IN-MEMORY STATE ───────────────────────────────────────────────────────────
-// waitingPool: keyed by category → array of poolItems
-const waitingPool = { random: [], female: [], male: [], other: [] };
-
-// activeChats: chatId → { a_anon, b_anon, a_tg, b_tg, startedAt, a_msgs, b_msgs, idleTimer, mood, interests }
-const activeChats = new Map();
-
-// tgToAnon: tg_id → { anon, chatId, partnerAnon, partnerTg, startedAt }
-const tgToAnon = {};
-
-// anti-spam: tg_id → { count, resetAt }
-const spamTracker = {};
-
-// pending game states: chatId → { game, state }
-const gameStates = new Map();
+// ─── IN-MEMORY STATE ──────────────────────────────────────────────────────────
+const waitingPool  = { random: [], female: [], male: [], other: [] };
+const activeChats  = new Map();   // chatId → chat object
+const tgToAnon     = {};          // tg_id  → { anon, chatId, partnerAnon, partnerTg, startedAt }
+const spamTracker  = {};          // tg_id  → { count, resetAt }
+const gameStates   = new Map();   // chatId → game state
+const aiSessions   = new Map();   // anon_id → OpenAI history[]
+const aiChats      = new Map();   // tg_id  → { anon_id, active }
 
 // ─── BOT SETUP ────────────────────────────────────────────────────────────────
 const bot = new Telegraf(BOT_TOKEN);
 bot.use(session());
 
-// ─── CONSTANTS / STRINGS ──────────────────────────────────────────────────────
-const MOODS = ['😊 Happy', '😔 Sad', '🤔 Philosophical', '🔥 Flirty', '😂 Funny', '💪 Motivational', '😴 Chill'];
-const INTEREST_TAGS = ['🎵 Music', '🎮 Gaming', '📚 Books', '🏋️ Fitness', '🎨 Art', '💻 Tech', '🍕 Food', '✈️ Travel', '💰 Crypto', '🎬 Movies', '🌿 Nature', '🧠 Philosophy'];
-const LANGUAGES = ['Any', 'English', 'Hindi', 'Spanish', 'Arabic', 'Russian', 'French'];
+// ─── CONSTANTS ────────────────────────────────────────────────────────────────
+const MOODS = ['😊 Happy','😔 Sad','🤔 Philosophical','🔥 Flirty','😂 Funny','💪 Motivational','😴 Chill'];
+const INTEREST_TAGS = ['🎵 Music','🎮 Gaming','📚 Books','🏋️ Fitness','🎨 Art','💻 Tech','🍕 Food','✈️ Travel','💰 Crypto','🎬 Movies','🌿 Nature','🧠 Philosophy'];
+const LANGUAGES = ['Any','English','Hindi','Spanish','Arabic','Russian','French'];
 
 const LOBBY_BUTTONS = [
-  ['🚀 Random Chat', '😍 Flirt Chat'],
-  ['🔍 Match by Interest', '🎭 Match by Mood'],
-  ['👤 Profile', '🎁 Daily Bonus'],
-  ['📊 Leaderboard', '🎮 Mini Games'],
-  ['💎 Premium', '🔗 Refer & Earn']
+  ['🚀 Random Chat',      '😍 Flirt Chat'],
+  ['🔍 Match by Interest','🎭 Match by Mood'],
+  ['👤 Profile',          '🎁 Daily Bonus'],
+  ['📊 Leaderboard',      '🎮 Mini Games'],
+  ['💎 Premium',          '🔗 Refer & Earn']
 ];
 
 const WORDS = {
@@ -226,7 +216,7 @@ const WORDS = {
   widening:  '⏳ Still searching — widening filters...',
   found:     '🦋 Partner found! Say hi 👋',
   help:      '/next — skip to next chat\n/stop — end chat\n/game — play a mini-game\n/report — report partner',
-  lobby:     'You\'re in the lobby. Choose an option:',
+  lobby:     "You're in the lobby. Choose an option:",
   err_chat:  '⚠️ End your current chat first (/stop).',
   no_chat:   '🤷 You\'re not in a chat right now.',
 };
@@ -237,7 +227,7 @@ const MOD = {
   threats:  /\b(i will kill|i will rape|i will hurt|shoot you|bomb|stab you|murder)\b/i,
   doxx:     /\b(your address|phone number|your location|your school|doxx)\b/i,
   hate:     /\b(nigger|faggot|kike|chink|wetback|spic)\b/i,
-  spam:     /(.)\1{15,}|http[s]?:\/\/\S+/i  // repeated chars or links
+  spam:     /(.)\1{15,}|https?:\/\/\S+/i
 };
 
 function checkModeration(text) {
@@ -250,7 +240,6 @@ function checkModeration(text) {
   return null;
 }
 
-// Anti-spam rate limiter (max 5 msgs/3s)
 function isSpamming(tg_id) {
   const now = Date.now();
   if (!spamTracker[tg_id] || spamTracker[tg_id].resetAt < now) {
@@ -262,18 +251,18 @@ function isSpamming(tg_id) {
 }
 
 // ─── KEYBOARDS ────────────────────────────────────────────────────────────────
-const lobbyKb    = () => Markup.keyboard(LOBBY_BUTTONS).resize();
-const searchKb   = () => Markup.keyboard([['❌ Cancel Search']]).resize();
-const chatKb     = () => Markup.inlineKeyboard([
-  [Markup.button.callback('👍 Thumbs Up', 'rate_5'), Markup.button.callback('👎 Thumbs Down', 'rate_1')],
-  [Markup.button.callback('⛔ Report', 'complain'), Markup.button.callback('⏭ Next Chat', 'btn_next')]
+const lobbyKb   = () => Markup.keyboard(LOBBY_BUTTONS).resize();
+const searchKb  = () => Markup.keyboard([['❌ Cancel Search']]).resize();
+const chatKb    = () => Markup.inlineKeyboard([
+  [Markup.button.callback('👍 Thumbs Up','rate_5'), Markup.button.callback('👎 Thumbs Down','rate_1')],
+  [Markup.button.callback('⛔ Report','complain'),  Markup.button.callback('⏭ Next Chat','btn_next')]
 ]);
-const endChatKb  = () => Markup.inlineKeyboard([
-  [Markup.button.callback('⭐ Rate Partner', 'show_rating')],
-  [Markup.button.callback('🔄 Find New Partner', 'btn_next'), Markup.button.callback('🏠 Lobby', 'go_lobby')]
+const endChatKb = () => Markup.inlineKeyboard([
+  [Markup.button.callback('⭐ Rate Partner','show_rating')],
+  [Markup.button.callback('🔄 Find New Partner','btn_next'), Markup.button.callback('🏠 Lobby','go_lobby')]
 ]);
 
-// ─── SESSION INIT ─────────────────────────────────────────────────────────────
+// ─── SESSION ──────────────────────────────────────────────────────────────────
 function ensureSession(ctx) {
   if (!ctx.session) ctx.session = {};
   if (!ctx.session.anon) {
@@ -283,9 +272,6 @@ function ensureSession(ctx) {
       chatId: null,
       searchingSince: null,
       awaitingComplaint: null,
-      awaitingInterests: false,
-      awaitingMood: false,
-      awaitingLanguage: false,
       premium: false,
       vip_tier: 0,
       queueJump: 0,
@@ -305,9 +291,8 @@ function removeFromPools(anon_id) {
 function interestScore(a, b) {
   if (!a || !b) return 0;
   const setA = new Set(a.split(','));
-  const setB = new Set(b.split(','));
   let common = 0;
-  setA.forEach(x => { if (setB.has(x)) common++; });
+  b.split(',').forEach(x => { if (setA.has(x)) common++; });
   return common;
 }
 
@@ -322,26 +307,23 @@ function tryMatch(item, genderPref, mood, interests) {
 
   for (const pool of pools) {
     for (let i = 0; i < pool.length; i++) {
-      const candidate = pool[i];
-      if (candidate.anon_id === item.anon_id) continue;
+      const c = pool[i];
+      if (c.anon_id === item.anon_id) continue;
       let score = 0;
-      if (mood && candidate.mood === mood) score += 3;
-      score += interestScore(interests, candidate.interests) * 2;
-      score += (candidate.premium || 0);
+      if (mood && c.mood === mood) score += 3;
+      score += interestScore(interests, c.interests) * 2;
+      score += (c.premium || 0);
       if (score > bestScore) { bestScore = score; bestPool = pool; bestIdx = i; }
     }
   }
 
-  if (bestIdx >= 0) {
-    const pick = bestPool.splice(bestIdx, 1)[0];
-    return pick;
-  }
+  if (bestIdx >= 0) return bestPool.splice(bestIdx, 1)[0];
   return null;
 }
 
 // ─── CONNECT PAIR ─────────────────────────────────────────────────────────────
 async function connectPair(a, b) {
-  const chatId = crypto.randomBytes(6).toString('hex');
+  const chatId    = crypto.randomBytes(6).toString('hex');
   const startedAt = Date.now();
 
   removeFromPools(a.anon_id);
@@ -350,8 +332,8 @@ async function connectPair(a, b) {
   activeChats.set(chatId, {
     a_anon: a.anon_id, b_anon: b.anon_id,
     a_tg: a.tg_id,    b_tg: b.tg_id,
-    startedAt,         a_msgs: 0, b_msgs: 0,
-    idleTimer: null,   mood: a.mood || null
+    startedAt, a_msgs: 0, b_msgs: 0,
+    idleTimer: null
   });
 
   tgToAnon[a.tg_id] = { anon: a.anon_id, chatId, partnerAnon: b.anon_id, partnerTg: b.tg_id, startedAt };
@@ -361,45 +343,28 @@ async function connectPair(a, b) {
   const streakA = updateStreak(a.anon_id);
   const streakB = updateStreak(b.anon_id);
 
-  const msgForA = buildFoundMessage(uB, streakA);
-  const msgForB = buildFoundMessage(uA, streakB);
+  try { await bot.telegram.sendMessage(a.tg_id, buildFoundMessage(uB, streakA), { parse_mode: 'Markdown', protect_content: true, ...chatKb() }); } catch(e) {}
+  try { await bot.telegram.sendMessage(b.tg_id, buildFoundMessage(uA, streakB), { parse_mode: 'Markdown', protect_content: true, ...chatKb() }); } catch(e) {}
 
-  try {
-    await bot.telegram.sendMessage(a.tg_id, msgForA, {
-      parse_mode: 'Markdown',
-      protect_content: true,
-      ...chatKb()
-    });
-  } catch(e) {}
-  try {
-    await bot.telegram.sendMessage(b.tg_id, msgForB, {
-      parse_mode: 'Markdown',
-      protect_content: true,
-      ...chatKb()
-    });
-  } catch(e) {}
-
-  // idle auto-end after 15 min
   const timer = setTimeout(() => endChat(chatId, 'idle_timeout'), 15 * 60 * 1000);
   const chat = activeChats.get(chatId);
   if (chat) chat.idleTimer = timer;
 }
 
 function buildFoundMessage(partnerUser, myStreak) {
-  const pRating = partnerUser ? getRating(partnerUser.anon_id) : 0;
-  const pInterests = partnerUser?.interests ? `🏷 Interests: ${partnerUser.interests}` : '🏷 Interests: not set';
-  const pMood = partnerUser?.mood ? `🎭 Mood: ${partnerUser.mood}` : '';
-  const stars = '⭐'.repeat(Math.round(pRating)) || 'no rating yet';
+  const pRating   = partnerUser ? getRating(partnerUser.anon_id) : 0;
+  const stars     = pRating > 0 ? '⭐'.repeat(Math.round(pRating)) : 'no rating yet';
+  const nick      = partnerUser?.nickname ? `👤 ${partnerUser.nickname}` : '👤 Anonymous';
+  const age       = partnerUser?.age      ? ` • ${partnerUser.age}y`     : '';
+  const bio       = partnerUser?.bio      ? `\n💬 "${partnerUser.bio}"`   : '';
+  const interests = partnerUser?.interests ? `\n🏷 ${partnerUser.interests}` : '';
+  const mood      = partnerUser?.mood     ? `\n🎭 Mood: ${partnerUser.mood}` : '';
   return [
-    `${WORDS.found}`,
-    ``,
-    `*Partner info:*`,
-    pInterests,
-    pMood,
+    WORDS.found, '',
+    `*Partner:*`,
+    `${nick}${age}${bio}${interests}${mood}`,
     `🏆 Rating: ${pRating} ${stars}`,
-    ``,
-    `🔥 Your streak: ${myStreak} day(s)`,
-    ``,
+    '', `🔥 Your streak: ${myStreak} day(s)`, '',
     WORDS.help
   ].filter(Boolean).join('\n');
 }
@@ -409,9 +374,9 @@ async function endChat(chatId, reason = 'ended') {
   const chat = activeChats.get(chatId);
   if (!chat) return;
 
-  const seconds = Math.floor((Date.now() - chat.startedAt) / 1000);
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
+  const seconds   = Math.floor((Date.now() - chat.startedAt) / 1000);
+  const mins      = Math.floor(seconds / 60);
+  const secs      = seconds % 60;
   const totalMsgs = (chat.a_msgs || 0) + (chat.b_msgs || 0);
 
   if (chat.idleTimer) clearTimeout(chat.idleTimer);
@@ -422,28 +387,20 @@ async function endChat(chatId, reason = 'ended') {
     `⏱ Duration: ${mins}m ${secs}s`,
     `📨 Messages exchanged: ${totalMsgs}`,
     reason === 'idle_timeout' ? '😴 Chat ended due to inactivity.' : '',
-    ``,
-    `Rate your partner or find a new one:`
+    ``, `Rate your partner or find a new one:`
   ].filter(Boolean).join('\n');
 
   for (const tgId of [chat.a_tg, chat.b_tg]) {
-    try {
-      await bot.telegram.sendMessage(tgId, summaryText, { parse_mode: 'Markdown', ...endChatKb() });
-    } catch(e) {}
+    try { await bot.telegram.sendMessage(tgId, summaryText, { parse_mode: 'Markdown', ...endChatKb() }); } catch(e) {}
     delete tgToAnon[tgId];
   }
 
-  // persist log
   logChat(chatId, chat.a_anon, chat.b_anon,
-    new Date(chat.startedAt).toISOString(),
-    new Date().toISOString(),
-    totalMsgs, reason);
+    new Date(chat.startedAt).toISOString(), new Date().toISOString(), totalMsgs, reason);
 
-  // update total messages for both users
   db.prepare('UPDATE users SET total_messages = total_messages + ? WHERE anon_id = ?').run(chat.a_msgs, chat.a_anon);
   db.prepare('UPDATE users SET total_messages = total_messages + ? WHERE anon_id = ?').run(chat.b_msgs, chat.b_anon);
 
-  // cleanup game state if any
   gameStates.delete(chatId);
 }
 
@@ -468,14 +425,14 @@ async function startSearch(ctx, opts = {}) {
   removeFromPools(s.anon_id);
 
   const item = {
-    anon_id: s.anon_id,
-    tg_id: ctx.from.id,
-    gender: u.gender,
-    premium: (s.queueJump > 0) ? 2 : (u.premium || 0),
-    joinedAt: Date.now(),
-    mood: u.mood,
+    anon_id:   s.anon_id,
+    tg_id:     ctx.from.id,
+    gender:    u.gender,
+    premium:   (s.queueJump > 0) ? 2 : (u.premium || 0),
+    joinedAt:  Date.now(),
+    mood:      u.mood,
     interests: u.interests,
-    language: u.language || 'any'
+    language:  u.language || 'any'
   };
   if (s.queueJump > 0) s.queueJump--;
 
@@ -485,16 +442,16 @@ async function startSearch(ctx, opts = {}) {
 
   await ctx.reply(WORDS.searching, searchKb());
 
-  const mood = opts.mood || u.mood;
+  const mood      = opts.mood || u.mood;
   const interests = u.interests;
 
-  // Poll for match
   let elapsed = 0;
   let wideningNotified = false;
+
   const poll = setInterval(async () => {
     elapsed += 1000;
 
-    // Stop if user cancelled or is already in a chat
+    // Stop if cancelled or already matched
     if (!s.searchingSince || tgToAnon[ctx.from.id]?.chatId) {
       clearInterval(poll);
       return;
@@ -510,45 +467,129 @@ async function startSearch(ctx, opts = {}) {
       return;
     }
 
-    // 20s — widening notification (only once, only if still searching)
     if (elapsed === 20000 && !wideningNotified && s.searchingSince) {
       wideningNotified = true;
       await ctx.reply(WORDS.widening).catch(() => {});
     }
 
-    // 60s — give up with warm message
     if (elapsed >= 60000) {
       clearInterval(poll);
       removeFromPools(s.anon_id);
       s.searchingSince = null;
 
-     const u = getUser(s.anon_id);
-     if (u.ai_enabled !== 0 && OPENAI_KEY) {
-       await ctx.reply(
-         `😔 *No humans found right now...*\n\nWant to chat with an AI partner while you wait?`,
-         { parse_mode: 'Markdown', ...Markup.inlineKeyboard([
-           [Markup.button.callback('🤖 Chat with AI', 'start_ai_chat')],
-           [Markup.button.callback('🔄 Try Again', 'btn_next'), Markup.button.callback('🏠 Lobby', 'go_lobby')]
-         ])}
-       );
-     } else {
-       await ctx.reply('🌱 *No partners found right now!*\n\nTry again in a few minutes or share your referral link!',
-         { parse_mode: 'Markdown', ...lobbyKb() });
-     }
-   }
+      const uu = getUser(s.anon_id);
+      if (uu.ai_enabled !== 0 && OPENAI_KEY) {
+        await ctx.reply(
+          `😔 *No humans found right now...*\n\nWant to chat with an AI partner while you wait?`,
+          { parse_mode: 'Markdown', ...Markup.inlineKeyboard([
+            [Markup.button.callback('🤖 Chat with AI', 'start_ai_chat')],
+            [Markup.button.callback('🔄 Try Again', 'btn_next'), Markup.button.callback('🏠 Lobby', 'go_lobby')]
+          ])}
+        );
+      } else {
+        await ctx.reply(
+          `🌱 *We're still a growing community!*\n\nNo one is searching right now. Try again in a few minutes or invite a friend!\n\n🔗 /refer`,
+          { parse_mode: 'Markdown', ...lobbyKb() }
+        );
+      }
+    }
   }, 1000);
+}
+
+// ─── AI FALLBACK ──────────────────────────────────────────────────────────────
+async function askAI(anon_id, userMessage) {
+  if (!OPENAI_KEY) return null;
+
+  if (!aiSessions.has(anon_id)) {
+    aiSessions.set(anon_id, [{
+      role: 'system',
+      content: `You are a friendly anonymous chat partner on GhostTalk — a Telegram anonymous chat app.
+Keep responses short (1-3 sentences), conversational, warm and engaging.
+Never reveal you are an AI unless directly asked. If asked, say "I might be AI, I might be human — that's the mystery of GhostTalk 😄".
+Match the user's energy — funny, thoughtful, casual as needed.`
+    }]);
+  }
+
+  const history = aiSessions.get(anon_id);
+  history.push({ role: 'user', content: userMessage });
+  if (history.length > 21) history.splice(1, history.length - 21);
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${OPENAI_KEY}`
+      },
+      body: JSON.stringify({ model: 'gpt-3.5-turbo', messages: history, max_tokens: 150, temperature: 0.85 })
+    });
+
+    const data = await response.json();
+    if (data.error) { console.error('OpenAI error:', data.error.message); return null; }
+
+    const reply = data.choices?.[0]?.message?.content?.trim();
+    if (reply) history.push({ role: 'assistant', content: reply });
+    return reply;
+
+  } catch(e) {
+    console.error('AI fetch error:', e.message);
+    return null;
+  }
+}
+
+function clearAISession(anon_id) { aiSessions.delete(anon_id); }
+
+async function startAIChat(ctx) {
+  const s = ensureSession(ctx);
+  aiChats.set(ctx.from.id, { anon_id: s.anon_id, active: true });
+
+  await ctx.reply(
+    `🤖 *No humans available right now...*\n\nBut I found someone interesting to talk to 👀\n\n_Human or AI? That's the mystery of GhostTalk._`,
+    { parse_mode: 'Markdown' }
+  );
+
+  const intro = await askAI(s.anon_id, '[SYSTEM: User just connected. Greet them warmly and ask something fun to start.]');
+  if (intro) {
+    setTimeout(async () => {
+      await ctx.reply(intro, {
+        protect_content: true,
+        ...Markup.inlineKeyboard([[
+          Markup.button.callback('⏹ End AI Chat', 'end_ai_chat'),
+          Markup.button.callback('🔄 Find Human', 'btn_next')
+        ]])
+      });
+    }, 1500);
+  }
+}
+
+async function handleAIMessage(ctx, text) {
+  const s = ensureSession(ctx);
+  await ctx.sendChatAction('typing');
+  await new Promise(r => setTimeout(r, 800 + Math.random() * 1200));
+  const reply = await askAI(s.anon_id, text);
+  if (reply) {
+    await ctx.reply(reply, {
+      protect_content: true,
+      ...Markup.inlineKeyboard([[
+        Markup.button.callback('⏹ End Chat', 'end_ai_chat'),
+        Markup.button.callback('🔄 Find Human', 'btn_next')
+      ]])
+    });
+  } else {
+    await ctx.reply("Hmm, lost my train of thought 😅 Say that again?", { protect_content: true });
+  }
 }
 
 // ─── MINI GAMES ───────────────────────────────────────────────────────────────
 const TRIVIA_QUESTIONS = [
-  { q: 'What planet is closest to the sun?', a: 'mercury', hint: 'Starts with M' },
-  { q: 'How many continents are there?', a: '7', hint: 'Single digit' },
-  { q: 'What gas do plants absorb?', a: 'co2', hint: 'Carbon something' },
-  { q: 'Who painted the Mona Lisa?', a: 'da vinci', hint: 'Italian artist' },
-  { q: 'What is the largest ocean?', a: 'pacific', hint: 'Starts with P' },
-  { q: 'How many sides does a hexagon have?', a: '6', hint: 'Less than 7' },
-  { q: 'What is the capital of Japan?', a: 'tokyo', hint: 'Modern megacity' },
-  { q: 'What animal is the fastest on land?', a: 'cheetah', hint: 'Big cat' },
+  { q: 'What planet is closest to the sun?',      a: 'mercury',  hint: 'Starts with M' },
+  { q: 'How many continents are there?',           a: '7',        hint: 'Single digit' },
+  { q: 'What gas do plants absorb?',               a: 'co2',      hint: 'Carbon something' },
+  { q: 'Who painted the Mona Lisa?',               a: 'da vinci', hint: 'Italian artist' },
+  { q: 'What is the largest ocean?',               a: 'pacific',  hint: 'Starts with P' },
+  { q: 'How many sides does a hexagon have?',      a: '6',        hint: 'Less than 7' },
+  { q: 'What is the capital of Japan?',            a: 'tokyo',    hint: 'Modern megacity' },
+  { q: 'What animal is the fastest on land?',      a: 'cheetah',  hint: 'Big cat' },
 ];
 
 const WOULD_YOU_RATHER = [
@@ -562,35 +603,34 @@ const WOULD_YOU_RATHER = [
 ];
 
 const TRUTH_OR_DARE = [
-  ['What\'s your most embarrassing memory?', 'Send a voice message saying "I am the champion!"'],
-  ['What\'s one lie you\'ve told recently?', 'Type with your eyes closed'],
-  ['What\'s your guilty pleasure?', 'Share your most used emoji'],
-  ['What\'s something you\'ve never told anyone?', 'Send a funny meme'],
+  ["What's your most embarrassing memory?",  'Send a voice message saying "I am the champion!"'],
+  ["What's one lie you've told recently?",    'Type with your eyes closed'],
+  ["What's your guilty pleasure?",            'Share your most used emoji'],
+  ["What's something you've never told anyone?", 'Send a funny meme'],
 ];
 
 async function startGame(chatId, gameName, tgA, tgB) {
   let gameMsg = '';
-  let state = {};
+  let state   = {};
 
   if (gameName === 'trivia') {
     const q = TRIVIA_QUESTIONS[Math.floor(Math.random() * TRIVIA_QUESTIONS.length)];
-    state = { type: 'trivia', question: q, scores: { [tgA]: 0, [tgB]: 0 }, answered: false };
-    gameMsg = `🎯 *Trivia Time!*\n\n❓ ${q.q}\n\n💡 Hint: ${q.hint}\n\nFirst to reply the correct answer wins! Type your answer:`;
+    state   = { type: 'trivia', question: q, answered: false };
+    gameMsg = `🎯 *Trivia Time!*\n\n❓ ${q.q}\n\n💡 Hint: ${q.hint}\n\nFirst to answer correctly wins!`;
   } else if (gameName === 'wyr') {
     const q = WOULD_YOU_RATHER[Math.floor(Math.random() * WOULD_YOU_RATHER.length)];
-    state = { type: 'wyr', question: q };
+    state   = { type: 'wyr', question: q };
     gameMsg = `🤔 *Would You Rather?*\n\n${q}\n\nBoth reply with your choice and reason!`;
   } else if (gameName === 'tod') {
     const pair = TRUTH_OR_DARE[Math.floor(Math.random() * TRUTH_OR_DARE.length)];
-    state = { type: 'tod', truth: pair[0], dare: pair[1] };
+    state   = { type: 'tod', truth: pair[0], dare: pair[1] };
     gameMsg = `🎲 *Truth or Dare?*\n\n🔍 Truth: ${pair[0]}\n💥 Dare: ${pair[1]}\n\nPick one and do it!`;
   } else if (gameName === 'wordchain') {
-    state = { type: 'wordchain', lastWord: null, usedWords: [], turn: tgA };
-    gameMsg = `🔤 *Word Chain!*\nStart a word. Next player must start a new word with the last letter.\n\nRules: No repeats! @A, you start:`;
+    state   = { type: 'wordchain', lastWord: null, usedWords: [], turn: tgA };
+    gameMsg = `🔤 *Word Chain!*\nEach word must start with the last letter of the previous word. No repeats!\n\nPlayer A, start with any word:`;
   }
 
   gameStates.set(chatId, state);
-
   for (const tgId of [tgA, tgB]) {
     try { await bot.telegram.sendMessage(tgId, gameMsg, { parse_mode: 'Markdown' }); } catch(e) {}
   }
@@ -607,18 +647,17 @@ async function handleGameInput(chatId, tg_id, text) {
     if (text.toLowerCase().trim() === game.question.a) {
       game.answered = true;
       gameStates.delete(chatId);
-      const msg = `✅ *Correct!* 🎉 You answered: "${text}"\n\nYou win this round! Play again with /game`;
-      try { await bot.telegram.sendMessage(tg_id, msg, { parse_mode: 'Markdown' }); } catch(e) {}
-      try { await bot.telegram.sendMessage(partnerTg, `❌ Your partner answered first! The answer was: *${game.question.a}*`, { parse_mode: 'Markdown' }); } catch(e) {}
+      try { await bot.telegram.sendMessage(tg_id, `✅ *Correct!* 🎉\n\nYou win this round! Play again with /game`, { parse_mode: 'Markdown' }); } catch(e) {}
+      try { await bot.telegram.sendMessage(partnerTg, `❌ Partner answered first! Answer was: *${game.question.a}*`, { parse_mode: 'Markdown' }); } catch(e) {}
       return true;
     }
   }
 
   if (game.type === 'wordchain') {
-    if (game.turn !== tg_id) return true; // not your turn, don't block forwarding
+    if (game.turn !== tg_id) return true;
     const word = text.toLowerCase().trim();
     if (game.lastWord && word[0] !== game.lastWord[game.lastWord.length - 1]) {
-      try { await bot.telegram.sendMessage(tg_id, `❌ Word must start with "${game.lastWord[game.lastWord.length - 1].toUpperCase()}"!`); } catch(e) {}
+      try { await bot.telegram.sendMessage(tg_id, `❌ Word must start with "${game.lastWord[game.lastWord.length-1].toUpperCase()}"!`); } catch(e) {}
       return true;
     }
     if (game.usedWords.includes(word)) {
@@ -628,23 +667,22 @@ async function handleGameInput(chatId, tg_id, text) {
     game.lastWord = word;
     game.usedWords.push(word);
     game.turn = partnerTg;
-    try { await bot.telegram.sendMessage(partnerTg, `🔤 Partner said: *${word}*\nYour turn! Start with: *${word[word.length - 1].toUpperCase()}*`, { parse_mode: 'Markdown' }); } catch(e) {}
-    return true; // consumed
+    try { await bot.telegram.sendMessage(partnerTg, `🔤 Partner said: *${word}*\nYour turn! Start with: *${word[word.length-1].toUpperCase()}*`, { parse_mode: 'Markdown' }); } catch(e) {}
+    return true;
   }
 
-  return false; // not consumed, forward normally
+  return false;
 }
 
-// ─── COMMANDS ────────────────────────────────────────────────────────────────
+// ─── COMMANDS ─────────────────────────────────────────────────────────────────
 
 bot.start(async (ctx) => {
   const s = ensureSession(ctx);
   ensureUserRow(s.anon_id);
 
-  // Handle referral links: /start ref_CODE
   const payload = ctx.startPayload;
   if (payload && payload.startsWith('ref_')) {
-    const code = payload.replace('ref_', '');
+    const code   = payload.replace('ref_', '');
     const refRow = db.prepare('SELECT * FROM referrals WHERE code = ?').get(code);
     if (refRow && refRow.owner_anon !== s.anon_id) {
       const u = getUser(s.anon_id);
@@ -652,20 +690,18 @@ bot.start(async (ctx) => {
         db.prepare('UPDATE users SET referred_by = ? WHERE anon_id = ?').run(refRow.owner_anon, s.anon_id);
         db.prepare('UPDATE referrals SET used_count = used_count + 1 WHERE code = ?').run(code);
         db.prepare('UPDATE users SET referral_count = referral_count + 1 WHERE anon_id = ?').run(refRow.owner_anon);
-        // give referrer a bonus
-        try { await bot.telegram.sendMessage(ctx.from.id - 1, ''); } catch(e) {} // placeholder
         await ctx.reply('🎉 You joined via a referral link! Your friend gets a bonus.');
       }
     }
   }
 
   await ctx.reply(
-    `👋 *Welcome to AnonymTalks!*\n\nChat anonymously with strangers worldwide.\n\nYour anonymous ID is set. No personal info is stored.\n\n💡 Quick start: tap *🚀 Random Chat*`,
+    `👻 *Welcome to GhostTalk!*\n\nChat anonymously with strangers worldwide.\n\nNo name. No number. Just talk.\n\n💡 Tap *🚀 Random Chat* to start!`,
     { parse_mode: 'Markdown', ...lobbyKb() }
   );
 });
 
-bot.command(['menu', 'settings'], async (ctx) => {
+bot.command(['menu','settings'], async (ctx) => {
   const s = ensureSession(ctx);
   if (s.inChat) return ctx.reply(WORDS.err_chat);
   await ctx.reply(WORDS.lobby, lobbyKb());
@@ -673,7 +709,6 @@ bot.command(['menu', 'settings'], async (ctx) => {
 
 bot.command('stop', async (ctx) => {
   const s = ensureSession(ctx);
-  // cancel search
   if (s.searchingSince) {
     removeFromPools(s.anon_id);
     s.searchingSince = null;
@@ -696,52 +731,53 @@ bot.command('next', async (ctx) => {
 
 bot.command('rules', async (ctx) => {
   await ctx.reply(
-    `📜 *AnonymTalks Rules*\n\n1. No sexual content involving minors — *instant permanent ban*\n2. No threats or violence\n3. No doxxing (sharing personal info)\n4. No spam or flood\n5. No hate speech\n\nViolations are automatically detected and escalated.\nRepeated reports = ban.\n\n_Be kind — people on the other side are real humans._`,
+    `📜 *GhostTalk Rules*\n\n1. No sexual content involving minors — *instant permanent ban*\n2. No threats or violence\n3. No doxxing\n4. No spam or links\n5. No hate speech\n\n_Be kind — there's a real human on the other side._`,
     { parse_mode: 'Markdown' }
   );
 });
 
 bot.command('profile', async (ctx) => {
   const s = ensureSession(ctx);
-  const u = getUser(s.anon_id);
+  const u      = getUser(s.anon_id);
   const rating = getRating(s.anon_id);
-  const stars = rating > 0 ? '⭐'.repeat(Math.round(rating)) : 'no rating yet';
-  const interests = u.interests || 'not set';
-  const mood = u.mood || 'not set';
+  const stars  = rating > 0 ? '⭐'.repeat(Math.round(rating)) : 'no rating yet';
 
   await ctx.reply(
     `👤 *Your Anonymous Profile*\n\n` +
-    `🆔 ID: \`${s.anon_id.slice(0, 8)}...\`\n` +
-    `🏆 Rating: ${rating} ${stars}\n` +
+    `🆔 ID: \`${s.anon_id.slice(0,8)}...\`\n` +
+    (u.nickname ? `👤 Name: ${u.nickname}\n` : '') +
+    (u.age      ? `🎂 Age: ${u.age}\n`        : '') +
+    (u.bio      ? `💬 Bio: ${u.bio}\n`        : '') +
+    `\n🏆 Rating: ${rating} ${stars}\n` +
     `💬 Chats: ${u.chat_count || 0}\n` +
     `📨 Messages: ${u.total_messages || 0}\n` +
     `🔥 Streak: ${u.streak_days || 0} day(s)\n` +
-    `🏷 Interests: ${interests}\n` +
-    `🎭 Mood: ${mood}\n` +
+    `🏷 Interests: ${u.interests || 'not set'}\n` +
+    `🎭 Mood: ${u.mood || 'not set'}\n` +
     `🌐 Language: ${u.language || 'any'}\n` +
     `💎 Tier: ${['Free','VIP','Premium'][u.vip_tier || 0]}\n` +
-    `👥 Referrals: ${u.referral_count || 0}`,
+    `👥 Referrals: ${u.referral_count || 0}\n\n` +
+    `_Edit with /setname /setage /setbio /setgender_`,
     { parse_mode: 'Markdown' }
   );
 });
 
 bot.command('bonus', async (ctx) => {
-  const s = ensureSession(ctx);
-  const today = new Date().toISOString().slice(0, 10);
-  const u = getUser(s.anon_id);
+  const s     = ensureSession(ctx);
+  const today = new Date().toISOString().slice(0,10);
+  const u     = getUser(s.anon_id);
   if (u.last_bonus_date === today) return ctx.reply('⏰ Daily bonus already claimed today! Come back tomorrow.');
   db.prepare('UPDATE users SET last_bonus_date = ? WHERE anon_id = ?').run(today, s.anon_id);
   s.queueJump = (s.queueJump || 0) + 1;
-  await ctx.reply(`🎁 *Daily Bonus Claimed!*\n\n✅ +1 Queue Jump Token — you'll be prioritized in the next search.\n🔥 Keep chatting daily to maintain your streak!`, { parse_mode: 'Markdown' });
+  await ctx.reply(`🎁 *Daily Bonus Claimed!*\n\n✅ +1 Queue Jump Token added.\n🔥 Keep chatting daily to build your streak!`, { parse_mode: 'Markdown' });
 });
 
 bot.command('game', async (ctx) => {
   const mapping = tgToAnon[ctx.from.id];
-  if (!mapping) return ctx.reply('Start a chat first to play games!');
+  if (!mapping?.chatId) return ctx.reply('Start a chat first, then use /game! 🎮');
   const chat = activeChats.get(mapping.chatId);
   if (!chat) return ctx.reply('No active chat found.');
 
-  // If game already running, show stop option
   if (gameStates.has(mapping.chatId)) {
     return ctx.reply('🎮 A game is already running!', Markup.inlineKeyboard([
       [Markup.button.callback('🛑 Stop Current Game', `stop_game_${mapping.chatId}`)]
@@ -751,7 +787,7 @@ bot.command('game', async (ctx) => {
   await ctx.reply('🎮 *Choose a Mini Game:*', {
     parse_mode: 'Markdown',
     ...Markup.inlineKeyboard([
-      [Markup.button.callback('🧠 Trivia', `game_trivia_${mapping.chatId}`), Markup.button.callback('🤔 Would You Rather', `game_wyr_${mapping.chatId}`)],
+      [Markup.button.callback('🧠 Trivia', `game_trivia_${mapping.chatId}`),   Markup.button.callback('🤔 Would You Rather', `game_wyr_${mapping.chatId}`)],
       [Markup.button.callback('🎲 Truth or Dare', `game_tod_${mapping.chatId}`), Markup.button.callback('🔤 Word Chain', `game_wordchain_${mapping.chatId}`)],
       [Markup.button.callback('❌ Cancel', 'game_cancel')]
     ])
@@ -759,73 +795,92 @@ bot.command('game', async (ctx) => {
 });
 
 bot.command('report', async (ctx) => {
-  const s = ensureSession(ctx);
+  const s       = ensureSession(ctx);
   const mapping = tgToAnon[ctx.from.id];
   if (!mapping) return ctx.reply('No active chat to report.');
   s.awaitingComplaint = { accusedAnon: mapping.partnerAnon };
-  await ctx.reply('📝 Describe the violation briefly (or type "spam" / "abuse" / "hate"):');
+  await ctx.reply('📝 Briefly describe the violation:');
 });
 
-bot.command('leaderboard', async (ctx) => {
-  await showLeaderboard(ctx);
+bot.command('leaderboard', async (ctx) => { await showLeaderboard(ctx); });
+bot.command('refer',       async (ctx) => { await showReferral(ctx); });
+bot.command('interests',   async (ctx) => { await showInterestPicker(ctx); });
+bot.command('mood',        async (ctx) => { await showMoodPicker(ctx); });
+bot.command('language',    async (ctx) => { await showLanguagePicker(ctx); });
+
+bot.command('setname', async (ctx) => {
+  const s    = ensureSession(ctx);
+  const args = ctx.message.text.split(' ').slice(1).join(' ').trim();
+  if (!args) return ctx.reply('Usage: /setname YourNickname');
+  if (args.length > 24) return ctx.reply('Max 24 characters.');
+  db.prepare('UPDATE users SET nickname = ? WHERE anon_id = ?').run(args, s.anon_id);
+  await ctx.reply(`✅ Nickname set to: *${args}*`, { parse_mode: 'Markdown' });
 });
 
-bot.command('refer', async (ctx) => {
-  await showReferral(ctx);
+bot.command('setage', async (ctx) => {
+  const s   = ensureSession(ctx);
+  const age = parseInt(ctx.message.text.split(' ')[1]);
+  if (!age || age < 13 || age > 99) return ctx.reply('Usage: /setage 21  (must be 13–99)');
+  db.prepare('UPDATE users SET age = ? WHERE anon_id = ?').run(age, s.anon_id);
+  await ctx.reply(`✅ Age set to: *${age}*`, { parse_mode: 'Markdown' });
 });
 
-bot.command('interests', async (ctx) => {
-  await showInterestPicker(ctx);
+bot.command('setbio', async (ctx) => {
+  const s   = ensureSession(ctx);
+  const bio = ctx.message.text.split(' ').slice(1).join(' ').trim();
+  if (!bio) return ctx.reply('Usage: /setbio I love music and late night chats');
+  if (bio.length > 120) return ctx.reply('Bio too long — max 120 characters.');
+  db.prepare('UPDATE users SET bio = ? WHERE anon_id = ?').run(bio, s.anon_id);
+  await ctx.reply(`✅ Bio saved: "${bio}"`);
 });
 
-bot.command('mood', async (ctx) => {
-  await showMoodPicker(ctx);
+bot.command('setgender', async (ctx) => {
+  await ctx.reply('Select your gender:', Markup.inlineKeyboard([
+    [Markup.button.callback('♂ Male','sg_male'),   Markup.button.callback('♀ Female','sg_female')],
+    [Markup.button.callback('⚧ Other','sg_other'), Markup.button.callback('— Private','sg_none')]
+  ]));
 });
 
-bot.command('language', async (ctx) => {
-  await showLanguagePicker(ctx);
+bot.command('app', async (ctx) => {
+  if (!WEBAPP_URL) return ctx.reply('WebApp coming soon!');
+  await ctx.reply('👻 Open GhostTalk App:', Markup.inlineKeyboard([
+    [Markup.button.webApp('Open GhostTalk App', WEBAPP_URL)]
+  ]));
 });
 
 bot.command('premium', async (ctx) => {
   await ctx.reply(
-    `💎 *AnonymTalks Premium*\n\n` +
+    `💎 *GhostTalk Premium*\n\n` +
     `*Free:* Basic matching, 1 queue jump/day\n\n` +
-    `*VIP (₹49/mo):*\n` +
-    `• Priority matching\n• Interest-based matching\n• Mood-based matching\n• 3 queue jumps/day\n\n` +
-    `*Premium (₹99/mo):*\n` +
-    `• Everything in VIP\n• Language filter\n• See partner's mood before connecting\n• Extended idle time (30 min)\n• Skip ads\n\n` +
+    `*VIP (₹49/mo):*\n• Priority matching\n• Interest & mood matching\n• 3 queue jumps/day\n\n` +
+    `*Premium (₹99/mo):*\n• Everything in VIP\n• Language filter\n• 30 min idle time\n• AI chat partner\n\n` +
     `Contact @YourAdminHandle to subscribe.`,
     { parse_mode: 'Markdown' }
   );
 });
 
-// Admin commands
 bot.command('admin', async (ctx) => {
   if (!ADMIN_IDS.includes(ctx.from.id)) return;
-  const stats = db.prepare('SELECT * FROM bot_stats').all();
-  const activeNow = activeChats.size;
-  const waitingNow = Object.values(waitingPool).reduce((a, b) => a + b.length, 0);
-  const statsText = stats.map(r => `${r.key}: ${r.value}`).join('\n');
+  const stats      = db.prepare('SELECT * FROM bot_stats').all();
+  const activeNow  = activeChats.size;
+  const waitingNow = Object.values(waitingPool).reduce((a,b) => a + b.length, 0);
   await ctx.reply(
-    `🛠 *Admin Dashboard*\n\n` +
-    `🟢 Active chats: ${activeNow}\n` +
-    `⏳ Searching: ${waitingNow}\n\n` +
-    statsText,
+    `🛠 *Admin Dashboard*\n\n🟢 Active chats: ${activeNow}\n⏳ Searching: ${waitingNow}\n\n` +
+    stats.map(r => `${r.key}: ${r.value}`).join('\n'),
     { parse_mode: 'Markdown', ...Markup.inlineKeyboard([
-      [Markup.button.callback('📋 Recent Complaints', 'admin_complaints')],
-      [Markup.button.callback('🚫 Recent Bans', 'admin_bans')]
+      [Markup.button.callback('📋 Recent Complaints','admin_complaints')]
     ])}
   );
 });
 
 bot.command('ban', async (ctx) => {
   if (!ADMIN_IDS.includes(ctx.from.id)) return;
-  const args = ctx.message.text.split(' ');
+  const args    = ctx.message.text.split(' ');
   if (args.length < 2) return ctx.reply('Usage: /ban <anon_id> [reason]');
   const anon_id = args[1];
-  const reason = args.slice(2).join(' ') || 'Rule violation';
+  const reason  = args.slice(2).join(' ') || 'Rule violation';
   db.prepare('UPDATE users SET banned = 1, ban_reason = ? WHERE anon_id = ?').run(reason, anon_id);
-  await ctx.reply(`✅ User ${anon_id.slice(0,8)}... banned. Reason: ${reason}`);
+  await ctx.reply(`✅ Banned: ${anon_id.slice(0,8)}... Reason: ${reason}`);
 });
 
 bot.command('unban', async (ctx) => {
@@ -833,174 +888,86 @@ bot.command('unban', async (ctx) => {
   const args = ctx.message.text.split(' ');
   if (args.length < 2) return ctx.reply('Usage: /unban <anon_id>');
   db.prepare('UPDATE users SET banned = 0, ban_reason = NULL WHERE anon_id = ?').run(args[1]);
-  await ctx.reply(`✅ User unbanned.`);
+  await ctx.reply('✅ User unbanned.');
 });
 
-// ═══════════════════════════════════════════════════════════════════
-// PASTE THIS ENTIRE BLOCK into your anonymtalks-bot.js
-// Add it AFTER the existing bot.command('unban') block (~line 820)
-// ═══════════════════════════════════════════════════════════════════
-
-// ─── NEW ENV VARS NEEDED IN .env ─────────────────────────────────────────────
-// WEBAPP_URL=https://your-webapp.vercel.app
-// OPENAI_API_KEY=sk-...   (get free at platform.openai.com)
-// ─────────────────────────────────────────────────────────────────────────────
-
-const WEBAPP_URL = process.env.WEBAPP_URL || '';
-const OPENAI_KEY = process.env.OPENAI_API_KEY || '';
-
-// ─── AI FALLBACK: call OpenAI when no human partner found ─────────────────────
-// aiSessions: anon_id → conversation history array
-const aiSessions = new Map();
-
-async function askAI(anon_id, userMessage) {
-  if (!OPENAI_KEY) return null;
-  
-  if (!aiSessions.has(anon_id)) {
-    aiSessions.set(anon_id, [
-      {
-        role: 'system',
-        content: `You are a friendly anonymous chat partner on GhostTalk — a Telegram anonymous chat app. 
-Keep responses short (1-3 sentences), conversational, warm and engaging like a real person would chat.
-Never reveal you are an AI unless directly asked. If asked, say "I might be AI, I might be human — that's the mystery of GhostTalk 😄".
-Topics: casual chat, life, interests, opinions, jokes, advice. Avoid politics and religion unless user brings it up.
-Match the user's energy — if they're funny, be funny. If they're deep, be thoughtful.`
-      }
-    ]);
+// ─── LOBBY BUTTON HANDLERS ────────────────────────────────────────────────────
+bot.hears('🚀 Random Chat',       (ctx) => startSearch(ctx, { mode: 'random' }));
+bot.hears('😍 Flirt Chat',        (ctx) => startSearch(ctx, { mode: 'random', flirt: true }));
+bot.hears('🔍 Match by Interest', showInterestPicker);
+bot.hears('🎭 Match by Mood',     showMoodPicker);
+bot.hears('👤 Profile',           (ctx) => bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/profile' } }));
+bot.hears('🎁 Daily Bonus',       (ctx) => bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/bonus'   } }));
+bot.hears('📊 Leaderboard',       showLeaderboard);
+bot.hears('💎 Premium',           (ctx) => bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/premium' } }));
+bot.hears('🎮 Mini Games',        (ctx) => ctx.reply('Start a chat first, then use /game to play with your partner! 🎮'));
+bot.hears('🔗 Refer & Earn',      showReferral);
+bot.hears('❌ Cancel Search', async (ctx) => {
+  const s = ensureSession(ctx);
+  if (s.searchingSince) {
+    removeFromPools(s.anon_id);
+    s.searchingSince = null;
+    return ctx.reply('🛑 Search canceled.', lobbyKb());
   }
-  
-  const history = aiSessions.get(anon_id);
-  history.push({ role: 'user', content: userMessage });
-  
-  // Keep history to last 20 messages to save tokens
-  if (history.length > 21) history.splice(1, history.length - 21);
-
-  try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_KEY}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-3.5-turbo',
-        messages: history,
-        max_tokens: 150,
-        temperature: 0.85
-      })
-    });
-    
-    const data = await response.json();
-    
-    if (data.error) {
-      console.error('OpenAI error:', data.error.message);
-      return null;
-    }
-    
-    const reply = data.choices?.[0]?.message?.content?.trim();
-    if (reply) history.push({ role: 'assistant', content: reply });
-    return reply;
-    
-  } catch (e) {
-    console.error('AI fetch error:', e.message);
-    return null;
-  }
-}
-
-// Clear AI session when user leaves
-function clearAISession(anon_id) {
-  aiSessions.delete(anon_id);
-}
-
-// ─── AI CHAT STATE ─────────────────────────────────────────────────────────────
-// aiChats: tg_id → { anon_id, active: true }
-const aiChats = new Map();
-
-async function startAIChat(ctx) {
-  const s = ensureSession(ctx);
-  const u = getUser(s.anon_id);
-  
-  aiChats.set(ctx.from.id, { anon_id: s.anon_id, active: true });
-  
-  const intro = await askAI(s.anon_id, '[SYSTEM: User just connected. Greet them warmly and ask something interesting to start the conversation. Be mysterious and fun.]');
-  
-  await ctx.reply(
-    `🤖 *No humans available right now...*\n\nBut I found someone interesting to talk to 👀\n\n_The mystery remains — human or AI? You decide._`,
-    { parse_mode: 'Markdown' }
-  );
-  
-  setTimeout(async () => {
-    if (intro) {
-      await ctx.reply(intro, {
-        protect_content: true,
-        ...Markup.inlineKeyboard([[
-          Markup.button.callback('⏹ End AI Chat', 'end_ai_chat'),
-          Markup.button.callback('🔄 Try Find Human', 'btn_next')
-        ]])
-      });
-    }
-  }, 1500);
-}
-
-// Handle AI chat message
-async function handleAIMessage(ctx, text) {
-  const s = ensureSession(ctx);
-  
-  // Show typing indicator
-  await ctx.sendChatAction('typing');
-  
-  // Add small delay to feel human-like (1-2 seconds)
-  const delay = 800 + Math.random() * 1200;
-  await new Promise(r => setTimeout(r, delay));
-  
-  const reply = await askAI(s.anon_id, text);
-  
-  if (reply) {
-    await ctx.reply(reply, {
-      protect_content: true,
-      ...Markup.inlineKeyboard([[
-        Markup.button.callback('⏹ End Chat', 'end_ai_chat'),
-        Markup.button.callback('🔄 Find Human', 'btn_next')
-      ]])
-    });
-  } else {
-    await ctx.reply("Hmm, I lost my train of thought... 😅 Say that again?", { protect_content: true });
-  }
-}
-
-// ─── PROFILE COMMANDS ─────────────────────────────────────────────────────────
-bot.command('setname', async (ctx) => {
-  const s = ensureSession(ctx);
-  const args = ctx.message.text.split(' ').slice(1).join(' ').trim();
-  if (!args) return ctx.reply('Usage: /setname YourNickname\nExample: /setname NightOwl');
-  if (args.length > 24) return ctx.reply('Nickname too long — max 24 characters.');
-  db.prepare('UPDATE users SET nickname = ? WHERE anon_id = ?').run(args, s.anon_id);
-  await ctx.reply(`✅ Nickname set to: *${args}*\nYour partner will see this when you chat.`, { parse_mode: 'Markdown' });
+  return ctx.reply('Not searching right now.', lobbyKb());
 });
 
-bot.command('setage', async (ctx) => {
-  const s = ensureSession(ctx);
-  const age = parseInt(ctx.message.text.split(' ')[1]);
-  if (!age || age < 13 || age > 99) return ctx.reply('Usage: /setage 21\nAge must be between 13 and 99.');
-  db.prepare('UPDATE users SET age = ? WHERE anon_id = ?').run(age, s.anon_id);
-  await ctx.reply(`✅ Age set to: *${age}*`, { parse_mode: 'Markdown' });
-});
+// ─── INLINE CALLBACKS ─────────────────────────────────────────────────────────
+bot.action('rate_5', async (ctx) => { await ctx.answerCbQuery(); await doRate(ctx, 5); });
+bot.action('rate_1', async (ctx) => { await ctx.answerCbQuery(); await doRate(ctx, 1); });
 
-bot.command('setbio', async (ctx) => {
-  const s = ensureSession(ctx);
-  const bio = ctx.message.text.split(' ').slice(1).join(' ').trim();
-  if (!bio) return ctx.reply('Usage: /setbio I love music and late night chats\nMax 120 characters.');
-  if (bio.length > 120) return ctx.reply('Bio too long — max 120 characters.');
-  db.prepare('UPDATE users SET bio = ? WHERE anon_id = ?').run(bio, s.anon_id);
-  await ctx.reply(`✅ Bio saved!\n"${bio}"`, { parse_mode: 'Markdown' });
-});
-
-bot.command('setgender', async (ctx) => {
-  const s = ensureSession(ctx);
-  await ctx.reply('Select your gender:', Markup.inlineKeyboard([
-    [Markup.button.callback('♂ Male', 'sg_male'), Markup.button.callback('♀ Female', 'sg_female')],
-    [Markup.button.callback('⚧ Other', 'sg_other'), Markup.button.callback('— Private', 'sg_none')]
+bot.action('show_rating', async (ctx) => {
+  await ctx.answerCbQuery();
+  await ctx.reply('Rate your recent chat partner:', Markup.inlineKeyboard([
+    ['⭐','⭐⭐','⭐⭐⭐','⭐⭐⭐⭐','⭐⭐⭐⭐⭐'].map((s,i) => Markup.button.callback(s, `rate_exact_${i+1}`))
   ]));
+});
+
+bot.action(/rate_exact_(\d)/, async (ctx) => {
+  await ctx.answerCbQuery();
+  await doRate(ctx, parseInt(ctx.match[1]));
+});
+
+bot.action('complain', async (ctx) => {
+  await ctx.answerCbQuery();
+  const s       = ensureSession(ctx);
+  const mapping = tgToAnon[ctx.from.id];
+  if (!mapping) return ctx.reply('No active chat to report.');
+  s.awaitingComplaint = { accusedAnon: mapping.partnerAnon };
+  await ctx.reply('📝 Describe the violation briefly:');
+});
+
+bot.action('btn_next', async (ctx) => {
+  await ctx.answerCbQuery();
+  const s = ensureSession(ctx);
+  // Also end AI chat if active
+  if (aiChats.has(ctx.from.id)) {
+    aiChats.delete(ctx.from.id);
+    clearAISession(s.anon_id);
+  }
+  if (tgToAnon[ctx.from.id]?.chatId) {
+    await endChatForUser(s.anon_id, 'user_next');
+    s.inChat = false;
+  }
+  await startSearch(ctx, { mode: 'random' });
+});
+
+bot.action('go_lobby', async (ctx) => {
+  await ctx.answerCbQuery();
+  await ctx.reply(WORDS.lobby, lobbyKb());
+});
+
+bot.action('start_ai_chat', async (ctx) => {
+  await ctx.answerCbQuery();
+  await startAIChat(ctx);
+});
+
+bot.action('end_ai_chat', async (ctx) => {
+  await ctx.answerCbQuery();
+  const s = ensureSession(ctx);
+  aiChats.delete(ctx.from.id);
+  clearAISession(s.anon_id);
+  await ctx.reply('👋 Chat ended. Back to lobby!', lobbyKb());
 });
 
 bot.action(/^sg_(.+)$/, async (ctx) => {
@@ -1011,256 +978,54 @@ bot.action(/^sg_(.+)$/, async (ctx) => {
   await ctx.editMessageText(`✅ Gender set to: ${gender}`);
 });
 
-// ─── WEBAPP BUTTON ─────────────────────────────────────────────────────────────
-bot.command('app', async (ctx) => {
-  if (!WEBAPP_URL) return ctx.reply('WebApp not configured yet. Set WEBAPP_URL in .env');
-  await ctx.reply('👻 Open GhostTalk App:', Markup.inlineKeyboard([
-    [Markup.button.webApp('Open GhostTalk App', WEBAPP_URL)]
-  ]));
-});
-
-// Handle WebApp data (profile saves, game launches from webapp)
-bot.on('web_app_data', async (ctx) => {
-  const s = ensureSession(ctx);
-  try {
-    const data = JSON.parse(ctx.webAppData.data);
-    
-    if (data.action === 'save_profile') {
-      if (data.name)      db.prepare('UPDATE users SET nickname = ? WHERE anon_id = ?').run(data.name, s.anon_id);
-      if (data.age)       db.prepare('UPDATE users SET age = ? WHERE anon_id = ?').run(parseInt(data.age), s.anon_id);
-      if (data.bio)       db.prepare('UPDATE users SET bio = ? WHERE anon_id = ?').run(data.bio, s.anon_id);
-      if (data.mood)      db.prepare('UPDATE users SET mood = ? WHERE anon_id = ?').run(data.mood, s.anon_id);
-      if (data.interests) db.prepare('UPDATE users SET interests = ? WHERE anon_id = ?').run(data.interests, s.anon_id);
-      if (data.lang)      db.prepare('UPDATE users SET language = ? WHERE anon_id = ?').run(data.lang, s.anon_id);
-      if (data.gender)    db.prepare('UPDATE users SET gender = ? WHERE anon_id = ?').run(data.gender, s.anon_id);
-      
-      await ctx.reply('✅ Profile updated from app!', lobbyKb());
-    }
-    
-    if (data.action === 'find_partner') {
-      await startSearch(ctx, { mode: 'random' });
-    }
-    
-    if (data.action === 'start_game') {
-      const mapping = tgToAnon[ctx.from.id];
-      if (!mapping) return ctx.reply('Start a chat first to play games!');
-      const chat = activeChats.get(mapping.chatId);
-      if (!chat) return ctx.reply('No active chat found.');
-      await startGame(mapping.chatId, data.game, chat.a_tg, chat.b_tg);
-      await ctx.reply(`🎮 Game started: ${data.game}!`);
-    }
-    
-    if (data.action === 'toggle_ai') {
-      db.prepare('UPDATE users SET ai_enabled = ? WHERE anon_id = ?').run(data.value ? 1 : 0, s.anon_id);
-    }
-    
-  } catch(e) {
-    console.error('WebApp data error:', e.message);
-    await ctx.reply('Could not process app data. Please try again.');
-  }
-});
-
-// ─── END AI CHAT ACTION ───────────────────────────────────────────────────────
-bot.action('end_ai_chat', async (ctx) => {
-  await ctx.answerCbQuery();
-  const s = ensureSession(ctx);
-  aiChats.delete(ctx.from.id);
-  clearAISession(s.anon_id);
-  await ctx.reply('👋 AI chat ended. Back to lobby!', lobbyKb());
-});
-
-// ═══════════════════════════════════════════════════════════════════
-// ALSO: In your startSearch function, REPLACE the 60-second timeout
-// message with this (find the "60000" timeout block):
-//
-//   if (elapsed >= 60000) {
-//     clearInterval(poll);
-//     removeFromPools(s.anon_id);
-//     s.searchingSince = null;
-//
-//     // Check if user has AI enabled
-//     const u = getUser(s.anon_id);
-//     if (u.ai_enabled !== 0 && OPENAI_KEY) {
-//       await ctx.reply(
-//         `😔 *No humans found right now...*\n\nWant to chat with an AI partner while you wait?`,
-//         { parse_mode: 'Markdown', ...Markup.inlineKeyboard([
-//           [Markup.button.callback('🤖 Chat with AI', 'start_ai_chat')],
-//           [Markup.button.callback('🔄 Try Again', 'btn_next'), Markup.button.callback('🏠 Lobby', 'go_lobby')]
-//         ])}
-//       );
-//     } else {
-//       await ctx.reply('🌱 *No partners found right now!*\n\nTry again in a few minutes or share your referral link!',
-//         { parse_mode: 'Markdown', ...lobbyKb() });
-//     }
-//   }
-// ═══════════════════════════════════════════════════════════════════
-
-bot.action('start_ai_chat', async (ctx) => {
-  await ctx.answerCbQuery();
-  await startAIChat(ctx);
-});
-
-// ═══════════════════════════════════════════════════════════════════
-// ALSO: In your main bot.on('message') handler, INSIDE the
-// "In active chat" block, ADD this check at the very top:
-//
-//   // Check if in AI chat
-//   if (aiChats.has(ctx.from.id) && aiChats.get(ctx.from.id).active) {
-//     if (text) await handleAIMessage(ctx, text);
-//     return;
-//   }
-// ═══════════════════════════════════════════════════════════════════
-
-// ─── DB MIGRATION for new columns ─────────────────────────────────────────────
-// Add to your migrate.js — these new columns are needed:
-//
-// { col: 'nickname', def: `ALTER TABLE users ADD COLUMN nickname TEXT DEFAULT NULL` },
-// { col: 'age',      def: `ALTER TABLE users ADD COLUMN age INTEGER DEFAULT NULL` },
-// { col: 'bio',      def: `ALTER TABLE users ADD COLUMN bio TEXT DEFAULT NULL` },
-// { col: 'ai_enabled', def: `ALTER TABLE users ADD COLUMN ai_enabled INTEGER DEFAULT 1` },
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ─── UPDATE buildFoundMessage to show nickname/age/bio ────────────────────────
-// Replace the existing buildFoundMessage function with this:
-//
-// function buildFoundMessage(partnerUser, myStreak) {
-//   const pRating = partnerUser ? getRating(partnerUser.anon_id) : 0;
-//   const stars = '⭐'.repeat(Math.round(pRating)) || 'no rating yet';
-//   const nick = partnerUser?.nickname ? `👤 ${partnerUser.nickname}` : '👤 Anonymous';
-//   const age  = partnerUser?.age ? ` • ${partnerUser.age}y` : '';
-//   const bio  = partnerUser?.bio ? `\n💬 "${partnerUser.bio}"` : '';
-//   const interests = partnerUser?.interests ? `\n🏷 ${partnerUser.interests}` : '';
-//   const mood = partnerUser?.mood ? `\n🎭 Mood: ${partnerUser.mood}` : '';
-//   return [
-//     WORDS.found, '',
-//     `*Partner:*`,
-//     `${nick}${age}${bio}${interests}${mood}`,
-//     `🏆 Rating: ${pRating} ${stars}`,
-//     '', `🔥 Your streak: ${myStreak} day(s)`, '',
-//     WORDS.help
-//   ].filter(Boolean).join('\n');
-// }
-// ─── LOBBY BUTTON HANDLERS ───────────────────────────────────────────────────
-bot.hears('🚀 Random Chat', (ctx) => startSearch(ctx, { mode: 'random' }));
-bot.hears('😍 Flirt Chat',  (ctx) => startSearch(ctx, { mode: 'random', flirt: true }));
-bot.hears('❌ Cancel Search', async (ctx) => {
-  const s = ensureSession(ctx);
-  if (s.searchingSince) {
-    removeFromPools(s.anon_id);
-    s.searchingSince = null;
-    return ctx.reply('🛑 Search canceled.', lobbyKb());
-  }
-  return ctx.reply('Not searching.', lobbyKb());
-});
-
-bot.hears('🔍 Match by Interest', showInterestPicker);
-bot.hears('🎭 Match by Mood',     showMoodPicker);
-bot.hears('👤 Profile',           (ctx) => bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/profile' } }));
-bot.hears('🎁 Daily Bonus',       (ctx) => bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/bonus' } }));
-bot.hears('📊 Leaderboard',       showLeaderboard);
-bot.hears('💎 Premium',           (ctx) => bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/premium' } }));
-bot.hears('🎮 Mini Games',        (ctx) => ctx.reply('Start a chat first, then use /game to play with your partner! 🎮'));
-bot.hears('🔗 Refer & Earn',      showReferral);
-
-// ─── INLINE CALLBACKS ────────────────────────────────────────────────────────
-bot.action('rate_5', async (ctx) => { await ctx.answerCbQuery(); await doRate(ctx, 5); });
-bot.action('rate_1', async (ctx) => { await ctx.answerCbQuery(); await doRate(ctx, 1); });
-bot.action('show_rating', async (ctx) => {
-  await ctx.answerCbQuery();
-  await ctx.reply('Rate your recent chat partner:',
-    Markup.inlineKeyboard([
-      ['⭐', '⭐⭐', '⭐⭐⭐', '⭐⭐⭐⭐', '⭐⭐⭐⭐⭐'].map((s, i) =>
-        Markup.button.callback(s, `rate_exact_${i + 1}`)
-      )
-    ])
-  );
-});
-bot.action(/rate_exact_(\d)/, async (ctx) => {
-  await ctx.answerCbQuery();
-  const val = parseInt(ctx.match[1]);
-  await doRate(ctx, val);
-});
-bot.action('complain', async (ctx) => {
-  await ctx.answerCbQuery();
-  const s = ensureSession(ctx);
-  const mapping = tgToAnon[ctx.from.id];
-  if (!mapping) return ctx.reply('No active chat to report.');
-  s.awaitingComplaint = { accusedAnon: mapping.partnerAnon };
-  await ctx.reply('📝 Describe the violation briefly:');
-});
-bot.action('btn_next', async (ctx) => {
-  await ctx.answerCbQuery();
-  const s = ensureSession(ctx);
-  if (tgToAnon[ctx.from.id]?.chatId) {
-    await endChatForUser(s.anon_id, 'user_next');
-    s.inChat = false;
-  }
-  await startSearch(ctx, { mode: 'random' });
-});
-bot.action('go_lobby', async (ctx) => {
-  await ctx.answerCbQuery();
-  await ctx.reply(WORDS.lobby, lobbyKb());
-});
-
-// Gender filter
 bot.action(/filter_(.+)/, async (ctx) => {
-  const s = ensureSession(ctx);
   await ctx.answerCbQuery();
   const pref = ctx.match[1] === 'any' ? null : ctx.match[1];
   await startSearch(ctx, { mode: 'random', genderPref: pref });
 });
 
-// Interest selection
 bot.action(/interest_(.+)/, async (ctx) => {
-  const s = ensureSession(ctx);
-  await ctx.answerCbQuery();
+  const s   = ensureSession(ctx);
   const tag = ctx.match[1];
-  const u = getUser(s.anon_id);
+  if (tag === 'done') {
+    await ctx.answerCbQuery('Interests saved!');
+    const u = getUser(s.anon_id);
+    return ctx.editMessageText(`✅ Interests saved: ${u.interests || 'none'}`);
+  }
+  await ctx.answerCbQuery();
+  const u       = getUser(s.anon_id);
   const current = u.interests ? u.interests.split(',') : [];
-  const idx = current.indexOf(tag);
+  const idx     = current.indexOf(tag);
   if (idx >= 0) current.splice(idx, 1);
-  else current.push(tag);
-  const newVal = current.slice(0, 5).join(','); // max 5
+  else if (current.length < 5) current.push(tag);
+  else { await ctx.answerCbQuery('Max 5 interests!'); return; }
+  const newVal = current.join(',');
   db.prepare('UPDATE users SET interests = ? WHERE anon_id = ?').run(newVal || null, s.anon_id);
-  await ctx.answerCbQuery(`${idx >= 0 ? 'Removed' : 'Added'}: ${tag}`);
-  // re-render picker
   await ctx.editMessageText(
-    `🏷 *Select your interests* (max 5, tap to toggle):\nSelected: ${newVal || 'none'}`,
+    `🏷 *Select your interests* (max 5):\nSelected: ${newVal || 'none'}`,
     { parse_mode: 'Markdown', ...buildInterestKb(newVal) }
   );
 });
 
-bot.action('interest_done', async (ctx) => {
-  await ctx.answerCbQuery('Interests saved!');
-  const s = ensureSession(ctx);
-  const u = getUser(s.anon_id);
-  await ctx.editMessageText(`✅ Interests saved: ${u.interests || 'none'}\n\nUse 🔍 Match by Interest to find someone with similar interests!`);
-});
-
-// Mood selection
 bot.action(/mood_(.+)/, async (ctx) => {
-  const s = ensureSession(ctx);
+  const s    = ensureSession(ctx);
   await ctx.answerCbQuery();
   const mood = ctx.match[1];
   if (mood === 'clear') {
     db.prepare('UPDATE users SET mood = NULL WHERE anon_id = ?').run(s.anon_id);
-    await ctx.editMessageText('🎭 Mood cleared.');
-  } else {
-    db.prepare('UPDATE users SET mood = ? WHERE anon_id = ?').run(mood, s.anon_id);
-    await ctx.editMessageText(`🎭 Mood set to: ${mood}\n\nWe'll try to match you with someone in a similar mood!`);
+    return ctx.editMessageText('🎭 Mood cleared.');
   }
+  db.prepare('UPDATE users SET mood = ? WHERE anon_id = ?').run(mood, s.anon_id);
+  await ctx.editMessageText(`🎭 Mood set to: ${mood}`);
 });
 
-// Language selection
 bot.action(/lang_(.+)/, async (ctx) => {
   const s = ensureSession(ctx);
   await ctx.answerCbQuery();
-  const lang = ctx.match[1];
-  db.prepare('UPDATE users SET language = ? WHERE anon_id = ?').run(lang, s.anon_id);
-  await ctx.editMessageText(`🌐 Language preference set to: ${lang}`);
+  db.prepare('UPDATE users SET language = ? WHERE anon_id = ?').run(ctx.match[1], s.anon_id);
+  await ctx.editMessageText(`🌐 Language set to: ${ctx.match[1]}`);
 });
 
-// Game start
 bot.action(/game_(\w+)_(.+)/, async (ctx) => {
   await ctx.answerCbQuery('Game starting!');
   const [, gameName, chatId] = ctx.match;
@@ -1269,7 +1034,6 @@ bot.action(/game_(\w+)_(.+)/, async (ctx) => {
   await startGame(chatId, gameName, chat.a_tg, chat.b_tg);
 });
 
-// Stop game
 bot.action(/stop_game_(.+)/, async (ctx) => {
   await ctx.answerCbQuery('Game stopped!');
   const chatId = ctx.match[1];
@@ -1282,46 +1046,70 @@ bot.action(/stop_game_(.+)/, async (ctx) => {
   }
 });
 
-// Cancel game picker
 bot.action('game_cancel', async (ctx) => {
   await ctx.answerCbQuery('Cancelled');
-  await ctx.editMessageText('Game cancelled. Use /game anytime to play!');
+  await ctx.editMessageText('Game cancelled. Use /game anytime!');
 });
 
-// Admin callbacks
 bot.action('admin_complaints', async (ctx) => {
   if (!ADMIN_IDS.includes(ctx.from.id)) return ctx.answerCbQuery('Unauthorized');
   await ctx.answerCbQuery();
   const rows = db.prepare('SELECT * FROM complaints WHERE resolved = 0 ORDER BY timestamp DESC LIMIT 10').all();
   if (!rows.length) return ctx.reply('No open complaints.');
-  const text = rows.map(r =>
-    `#${r.id} | ${r.reason} | Sev:${r.severity}\n📝 ${(r.excerpt || '').slice(0, 60)}`
-  ).join('\n\n');
+  const text = rows.map(r => `#${r.id} | ${r.reason} | Sev:${r.severity}\n📝 ${(r.excerpt||'').slice(0,60)}`).join('\n\n');
   await ctx.reply(`📋 *Open Complaints:*\n\n${text}`, { parse_mode: 'Markdown' });
 });
 
-// ─── SEARCH BY GENDER UI ──────────────────────────────────────────────────────
+// ─── SEARCH BY GENDER ─────────────────────────────────────────────────────────
 bot.hears('🙋‍♀🙋‍♂ Search by Gender', async (ctx) => {
   await ctx.reply('Choose preferred gender:', Markup.inlineKeyboard([
-    [Markup.button.callback('♀ Female', 'filter_female'), Markup.button.callback('♂ Male', 'filter_male')],
-    [Markup.button.callback('🌈 Other', 'filter_other'),   Markup.button.callback('🎲 Any',   'filter_any')]
+    [Markup.button.callback('♀ Female','filter_female'), Markup.button.callback('♂ Male','filter_male')],
+    [Markup.button.callback('🌈 Other','filter_other'),  Markup.button.callback('🎲 Any','filter_any')]
   ]));
+});
+
+// ─── WEBAPP DATA ──────────────────────────────────────────────────────────────
+bot.on('web_app_data', async (ctx) => {
+  const s = ensureSession(ctx);
+  try {
+    const data = JSON.parse(ctx.webAppData.data);
+    if (data.action === 'save_profile') {
+      if (data.name)      db.prepare('UPDATE users SET nickname  = ? WHERE anon_id = ?').run(data.name,              s.anon_id);
+      if (data.age)       db.prepare('UPDATE users SET age       = ? WHERE anon_id = ?').run(parseInt(data.age),     s.anon_id);
+      if (data.bio)       db.prepare('UPDATE users SET bio       = ? WHERE anon_id = ?').run(data.bio,               s.anon_id);
+      if (data.mood)      db.prepare('UPDATE users SET mood      = ? WHERE anon_id = ?').run(data.mood,              s.anon_id);
+      if (data.interests) db.prepare('UPDATE users SET interests = ? WHERE anon_id = ?').run(data.interests,         s.anon_id);
+      if (data.lang)      db.prepare('UPDATE users SET language  = ? WHERE anon_id = ?').run(data.lang,              s.anon_id);
+      if (data.gender)    db.prepare('UPDATE users SET gender    = ? WHERE anon_id = ?').run(data.gender,            s.anon_id);
+      await ctx.reply('✅ Profile updated!', lobbyKb());
+    }
+    if (data.action === 'find_partner')  await startSearch(ctx, { mode: 'random' });
+    if (data.action === 'toggle_ai')     db.prepare('UPDATE users SET ai_enabled = ? WHERE anon_id = ?').run(data.value ? 1 : 0, s.anon_id);
+    if (data.action === 'start_game') {
+      const mapping = tgToAnon[ctx.from.id];
+      if (!mapping) return ctx.reply('Start a chat first!');
+      const chat = activeChats.get(mapping.chatId);
+      if (!chat)    return ctx.reply('No active chat found.');
+      await startGame(mapping.chatId, data.game, chat.a_tg, chat.b_tg);
+    }
+  } catch(e) {
+    console.error('WebApp data error:', e.message);
+  }
 });
 
 // ─── MAIN MESSAGE HANDLER ─────────────────────────────────────────────────────
 bot.on('message', async (ctx) => {
-  const s = ensureSession(ctx);
+  const s     = ensureSession(ctx);
   const tg_id = ctx.from.id;
+  const text  = ctx.message.text;
 
-  // Anti-spam check
-  if (isSpamming(tg_id)) {
-    return ctx.reply('🐢 Slow down! You\'re sending too fast.');
-  }
+  // Anti-spam
+  if (isSpamming(tg_id)) return ctx.reply('🐢 Slow down! You\'re sending too fast.');
 
-  // Awaiting complaint text
+  // Awaiting complaint
   if (s.awaitingComplaint) {
-    const accused = s.awaitingComplaint.accusedAnon;
-    const excerpt = ctx.message.text || '[non-text]';
+    const accused  = s.awaitingComplaint.accusedAnon;
+    const excerpt  = text || '[non-text]';
     const severity = checkModeration(excerpt)?.severity || 1;
     saveComplaint(s.anon_id, accused, 'user_report', excerpt, severity);
     s.awaitingComplaint = null;
@@ -1330,65 +1118,62 @@ bot.on('message', async (ctx) => {
       s.inChat = false;
       return ctx.reply('🚨 Severe violation reported. Chat ended and case escalated.', lobbyKb());
     }
-    return ctx.reply('✅ Complaint submitted. Thank you — our team will review it.');
+    return ctx.reply('✅ Complaint submitted. Thank you!');
   }
 
-  // In active chat — forward message
+  // AI chat
+  if (aiChats.has(tg_id) && aiChats.get(tg_id).active) {
+    if (text) await handleAIMessage(ctx, text);
+    return;
+  }
+
+  // Human chat
   const mapping = tgToAnon[tg_id];
   if (mapping?.chatId) {
     const chatId = mapping.chatId;
-    const chat = activeChats.get(chatId);
+    const chat   = activeChats.get(chatId);
     if (!chat) return ctx.reply('⚠️ Chat not found.', lobbyKb());
 
-    const text = ctx.message.text;
-
-    // Moderation on text
+    // Moderation
     if (text) {
       const mod = checkModeration(text);
       if (mod?.severity >= 3) {
         saveComplaint(mapping.anon, mapping.partnerAnon, mod.reason, text, mod.severity);
-        await ctx.reply('🚨 Your message contained a serious violation. Chat ended and case reported.');
-        await bot.telegram.sendMessage(mapping.partnerTg, '⚠️ Partner was removed for a policy violation.').catch(() => {});
+        await ctx.reply('🚨 Your message violated our rules. Chat ended and reported.');
+        await bot.telegram.sendMessage(mapping.partnerTg, '⚠️ Partner removed for a policy violation.').catch(() => {});
         await endChat(chatId, 'auto_moderation');
         s.inChat = false;
         return;
       }
       if (mod?.severity === 2) {
         saveComplaint(mapping.anon, mapping.partnerAnon, mod.reason, text, mod.severity);
-        await ctx.reply('⚠️ Warning: Your message may violate our rules. Please be respectful.');
+        await ctx.reply('⚠️ Warning: message may violate rules. Please be respectful.');
       }
       if (mod?.severity === 1) {
-        await ctx.reply('🔗 Sharing links is not allowed in chats.');
-        return; // don't forward
+        await ctx.reply('🔗 Links are not allowed in chats.');
+        return;
       }
     }
 
-    // Check game input
+    // Game input
     if (text) {
       const consumed = await handleGameInput(chatId, tg_id, text);
       if (consumed) return;
     }
 
-    // Forward all message types — text only, media blocked, protect_content disables screenshot/forward
+    // Forward (text + stickers only)
     try {
       if (ctx.message.text) {
         await bot.telegram.sendMessage(mapping.partnerTg, text, { protect_content: true });
       } else if (ctx.message.sticker) {
         await bot.telegram.sendSticker(mapping.partnerTg, ctx.message.sticker.file_id, { protect_content: true });
-      } else if (ctx.message.photo || ctx.message.video || ctx.message.voice ||
-                 ctx.message.audio || ctx.message.document || ctx.message.video_note ||
-                 ctx.message.animation) {
-        await ctx.reply('🚫 Media sharing is disabled for privacy and safety. Only text and stickers are allowed.', { protect_content: true });
-        return;
       } else {
-        await ctx.reply('⚠️ This message type is not supported.');
+        await ctx.reply('🚫 Only text and stickers are allowed for privacy and safety.');
         return;
       }
-    } catch(e) {
-      console.error('Forward error:', e.message);
-    }
+    } catch(e) { console.error('Forward error:', e.message); }
 
-    // Update message counters
+    // Counters
     if (chat.a_tg === tg_id) chat.a_msgs++;
     else chat.b_msgs++;
     db.prepare('UPDATE users SET total_messages = total_messages + 1 WHERE anon_id = ?').run(mapping.anon);
@@ -1396,13 +1181,13 @@ bot.on('message', async (ctx) => {
     // Reset idle timer
     if (chat.idleTimer) {
       clearTimeout(chat.idleTimer);
-      const idleMs = s.vip_tier >= 2 ? 30 * 60 * 1000 : 15 * 60 * 1000;
+      const idleMs = (s.vip_tier >= 2) ? 30 * 60 * 1000 : 15 * 60 * 1000;
       chat.idleTimer = setTimeout(() => endChat(chatId, 'idle_timeout'), idleMs);
     }
 
   } else {
-    // In lobby — show lobby menu for non-command text
-    if (ctx.message.text && !ctx.message.text.startsWith('/')) {
+    // Lobby — ignore commands (handled by bot.command), reply to plain text
+    if (text && !text.startsWith('/')) {
       await ctx.reply(WORDS.lobby, lobbyKb());
     }
   }
@@ -1413,18 +1198,17 @@ async function doRate(ctx, value) {
   const mapping = tgToAnon[ctx.from.id];
   if (!mapping?.partnerAnon) return ctx.reply('No recent partner to rate.');
   saveRating(mapping.partnerAnon, value);
-  const label = value >= 4 ? '⭐ Great rating!' : value >= 2 ? '👍 Decent rating.' : '💔 Low rating saved.';
-  await ctx.reply(`${label} Rating (${value}/5) saved for your partner.`);
+  const label = value >= 4 ? '⭐ Great rating!' : value >= 2 ? '👍 Decent.' : '💔 Low rating saved.';
+  await ctx.reply(`${label} (${value}/5) saved for your partner.`);
 }
 
 function buildInterestKb(selectedStr) {
   const selected = selectedStr ? selectedStr.split(',') : [];
-  const buttons = INTEREST_TAGS.map(tag => {
-    const isSelected = selected.includes(tag);
-    return Markup.button.callback(`${isSelected ? '✅' : '○'} ${tag}`, `interest_${tag}`);
-  });
+  const buttons  = INTEREST_TAGS.map(tag =>
+    Markup.button.callback(`${selected.includes(tag) ? '✅' : '○'} ${tag}`, `interest_${tag}`)
+  );
   const rows = [];
-  for (let i = 0; i < buttons.length; i += 2) rows.push(buttons.slice(i, i + 2));
+  for (let i = 0; i < buttons.length; i += 2) rows.push(buttons.slice(i, i+2));
   rows.push([Markup.button.callback('✅ Done', 'interest_done')]);
   return Markup.inlineKeyboard(rows);
 }
@@ -1439,60 +1223,48 @@ async function showInterestPicker(ctx) {
 }
 
 async function showMoodPicker(ctx) {
-  const s = ensureSession(ctx);
   const buttons = MOODS.map(m => Markup.button.callback(m, `mood_${m}`));
   const rows = [];
-  for (let i = 0; i < buttons.length; i += 2) rows.push(buttons.slice(i, i + 2));
+  for (let i = 0; i < buttons.length; i += 2) rows.push(buttons.slice(i, i+2));
   rows.push([Markup.button.callback('🚫 Clear mood', 'mood_clear')]);
-  await ctx.reply(
-    '🎭 *Set your current mood:*\nWe\'ll match you with someone in a similar vibe!',
-    { parse_mode: 'Markdown', ...Markup.inlineKeyboard(rows) }
-  );
+  await ctx.reply('🎭 *Set your mood:*', { parse_mode: 'Markdown', ...Markup.inlineKeyboard(rows) });
 }
 
 async function showLanguagePicker(ctx) {
   const buttons = LANGUAGES.map(l => Markup.button.callback(l, `lang_${l.toLowerCase()}`));
   const rows = [];
-  for (let i = 0; i < buttons.length; i += 2) rows.push(buttons.slice(i, i + 2));
+  for (let i = 0; i < buttons.length; i += 2) rows.push(buttons.slice(i, i+2));
   await ctx.reply('🌐 *Preferred language:*', { parse_mode: 'Markdown', ...Markup.inlineKeyboard(rows) });
 }
 
 async function showLeaderboard(ctx) {
   const top = db.prepare(
     `SELECT anon_id, chat_count, streak_days, total_messages,
-     CASE WHEN rating_count > 0 THEN ROUND(CAST(rating_sum AS FLOAT)/rating_count, 1) ELSE 0 END as avg_rating
+     CASE WHEN rating_count > 0 THEN ROUND(CAST(rating_sum AS FLOAT)/rating_count,1) ELSE 0 END as avg_rating
      FROM users ORDER BY chat_count DESC LIMIT 10`
   ).all();
-
   if (!top.length) return ctx.reply('No users yet!');
-
-  const medals = ['🥇', '🥈', '🥉'];
-  const lines = top.map((u, i) =>
-    `${medals[i] || `${i+1}.`} \`${u.anon_id.slice(0,6)}...\` | 💬 ${u.chat_count} chats | 🔥 ${u.streak_days}d streak | ⭐ ${u.avg_rating}`
+  const medals = ['🥇','🥈','🥉'];
+  const lines  = top.map((u,i) =>
+    `${medals[i] || `${i+1}.`} \`${u.anon_id.slice(0,6)}...\` | 💬 ${u.chat_count} | 🔥 ${u.streak_days}d | ⭐ ${u.avg_rating}`
   ).join('\n');
-
   await ctx.reply(`📊 *Top Chatters*\n\n${lines}`, { parse_mode: 'Markdown' });
 }
 
 async function showReferral(ctx) {
-  const s = ensureSession(ctx);
-  const u = getUser(s.anon_id);
-  const code = u.referral_code;
-  const link = `https://t.me/${BOT_USERNAME}?start=ref_${code}`;
-
+  const s    = ensureSession(ctx);
+  const u    = getUser(s.anon_id);
+  const link = `https://t.me/${BOT_USERNAME}?start=ref_${u.referral_code}`;
   await ctx.reply(
-    `🔗 *Refer & Earn*\n\n` +
-    `Share your link and earn queue jump bonuses for every friend who joins!\n\n` +
-    `Your link:\n\`${link}\`\n\n` +
-    `👥 Friends referred: ${u.referral_count || 0}\n` +
-    `🎁 For every 3 referrals: +1 VIP day`,
+    `🔗 *Refer & Earn*\n\nShare your link and earn rewards for every friend who joins!\n\n` +
+    `Your link:\n\`${link}\`\n\n👥 Friends referred: ${u.referral_count || 0}\n🎁 Every 3 referrals = +1 VIP day`,
     { parse_mode: 'Markdown' }
   );
 }
 
-// ─── GRACEFUL SHUTDOWN ────────────────────────────────────────────────────────
+// ─── SHUTDOWN ─────────────────────────────────────────────────────────────────
 process.on('SIGINT', () => {
-  console.log('\nShutting down gracefully...');
+  console.log('\nShutting down...');
   if (db) db.close();
   process.exit(0);
 });
@@ -1501,7 +1273,6 @@ process.on('SIGINT', () => {
 (async () => {
   await initDB();
   await bot.launch();
-  console.log('✅ AnonymTalks v2 bot is running!');
+  console.log('✅ GhostTalk bot is running!');
   console.log(`Admin IDs: ${ADMIN_IDS.join(', ') || 'none set'}`);
 })();
-
