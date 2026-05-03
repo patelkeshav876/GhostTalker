@@ -412,6 +412,28 @@ async function endChatForUser(anon_id, reason = 'ended') {
     }
   }
 }
+// Add CORS so webapp can fetch it
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', 'https://theghosttalk.vercel.app/');
+  next();
+});
+
+app.get('/api/stats', (req, res) => {
+  const stats = db.prepare('SELECT * FROM bot_stats').all();
+  const top   = db.prepare(
+    `SELECT anon_id, chat_count, streak_days,
+     CASE WHEN rating_count > 0 
+     THEN ROUND(CAST(rating_sum AS FLOAT)/rating_count,1) 
+     ELSE 0 END as avg_rating
+     FROM users ORDER BY chat_count DESC LIMIT 10`
+  ).all();
+  res.json({
+    active_chats: activeChats.size,
+    searching:    Object.values(waitingPool).reduce((a,b) => a+b.length, 0),
+    stats,
+    leaderboard: top
+  });
+});
 
 // ─── SEARCH FLOW ──────────────────────────────────────────────────────────────
 async function startSearch(ctx, opts = {}) {
