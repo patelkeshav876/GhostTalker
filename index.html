@@ -356,6 +356,15 @@
 <script>
 // Telegram WebApp init
 const tg = window.Telegram?.WebApp;
+const BOT_USERNAME = 'TheGhostTalkBot';
+
+// Update referral link with real user data if available.
+if (tg?.initDataUnsafe?.user) {
+  const userId = tg.initDataUnsafe.user.id;
+  document.getElementById('ref-link').textContent =
+    `t.me/${BOT_USERNAME}?start=ref_${userId}`;
+}
+
 if (tg) {
   tg.ready();
   tg.expand();
@@ -389,6 +398,17 @@ if (saved.aiEnabled === false) {
   document.getElementById('ai-toggle').className = 'ai-toggle off';
   document.getElementById('ai-dot').className = 'ai-dot off';
 }
+
+// Fetch live data from your Render URL.
+(async () => {
+  try {
+    const res = await fetch('https://ghosttalker-x76j.onrender.com/api/stats');
+    const data = await res.json();
+    // populate leaderboard with data.leaderboard
+  } catch (e) {
+    console.warn('Could not load live stats:', e);
+  }
+})();
 
 // Screen switching
 let activeTab = null;
