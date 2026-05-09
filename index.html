@@ -2,515 +2,1019 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
-<title>GhostTalk</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>GhostTalk — Anonymous Chat Bot</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
 <style>
-  :root {
-    --bg: #0a0a0f;
-    --surface: #12121a;
-    --surface2: #1a1a26;
-    --border: rgba(255,255,255,0.08);
-    --accent: #7c6fff;
-    --accent2: #ff6b9d;
-    --accent3: #6bffb8;
-    --text: #f0f0f8;
-    --muted: rgba(240,240,248,0.45);
-    --radius: 16px;
-    --radius-sm: 10px;
-  }
-  [data-theme="light"] {
-    --bg: #f4f3ff;
-    --surface: #ffffff;
-    --surface2: #eeecff;
-    --border: rgba(0,0,0,0.08);
-    --accent: #5b4fff;
-    --accent2: #e0457f;
-    --accent3: #1a9e6a;
-    --text: #0a0a1a;
-    --muted: rgba(10,10,26,0.45);
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; overflow-x: hidden; }
+/* ── TOKENS ── */
+:root {
+  --ink: #0a0a0f;
+  --paper: #f5f4f0;
+  --ghost: #ffffff;
+  --accent: #6c5ce7;
+  --accent2: #fd79a8;
+  --accent3: #00cec9;
+  --muted: rgba(10,10,15,0.45);
+  --border: rgba(10,10,15,0.1);
+  --surface: rgba(10,10,15,0.04);
+  --r: 14px;
+  --font-display: 'Bebas Neue', sans-serif;
+  --font-body: 'DM Sans', sans-serif;
+  --font-mono: 'DM Mono', monospace;
+}
+[data-dark] {
+  --ink: #f0eff8;
+  --paper: #0a0a0f;
+  --ghost: #12121e;
+  --muted: rgba(240,239,248,0.4);
+  --border: rgba(240,239,248,0.08);
+  --surface: rgba(240,239,248,0.04);
+}
 
-  .app { display: flex; flex-direction: column; height: 100vh; max-width: 430px; margin: 0 auto; }
+/* ── RESET ── */
+*,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
+html { scroll-behavior:smooth; }
+body { font-family:var(--font-body); background:var(--paper); color:var(--ink); transition:background .3s,color .3s; overflow-x:hidden; }
+a { color:inherit; text-decoration:none; }
+button { cursor:pointer; font-family:var(--font-body); }
+img { display:block; max-width:100%; }
 
-  /* TOP NAV */
-  .topnav { display: flex; align-items: center; padding: 14px 18px 0; gap: 0; border-bottom: 1px solid var(--border); background: var(--bg); position: sticky; top: 0; z-index: 10; }
-  .tab { flex: 1; text-align: center; padding: 10px 4px 12px; font-family: 'Syne', sans-serif; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; }
-  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+/* ── NAV ── */
+nav {
+  position:fixed; top:0; left:0; right:0; z-index:100;
+  display:flex; align-items:center; padding:0 32px;
+  height:60px; border-bottom:1px solid var(--border);
+  background:var(--paper); backdrop-filter:blur(20px);
+  transition:background .3s;
+}
+.nav-logo { display:flex; align-items:center; gap:10px; font-family:var(--font-display); font-size:22px; letter-spacing:1px; }
+.nav-logo .ghost-dot { width:28px; height:28px; background:linear-gradient(135deg,var(--accent),var(--accent2)); border-radius:50% 50% 50% 50% / 60% 60% 40% 40%; display:flex; align-items:center; justify-content:center; font-size:14px; }
+.nav-links { display:flex; align-items:center; gap:4px; margin:0 auto; }
+.nav-links a { padding:6px 14px; border-radius:8px; font-size:13px; font-weight:500; color:var(--muted); transition:all .15s; }
+.nav-links a:hover { color:var(--ink); background:var(--surface); }
+.nav-links a.active { color:var(--ink); }
+.nav-right { display:flex; align-items:center; gap:10px; }
+.theme-toggle { width:36px; height:36px; border-radius:8px; border:1px solid var(--border); background:transparent; display:flex; align-items:center; justify-content:center; font-size:16px; transition:background .15s; }
+.theme-toggle:hover { background:var(--surface); }
+.btn-tg { display:flex; align-items:center; gap:7px; padding:8px 16px; border-radius:8px; background:var(--accent); color:#fff; font-size:13px; font-weight:600; border:none; transition:opacity .15s; }
+.btn-tg:hover { opacity:.85; }
 
-  /* SCREENS */
-  .screen { display: none; flex: 1; overflow-y: auto; padding: 20px 18px 100px; }
-  .screen.active { display: block; }
+/* ── SECTIONS ── */
+section { display:none; }
+section.active { display:block; }
 
-  /* HERO */
-  .hero { text-align: center; padding: 24px 0 20px; }
-  .ghost-avatar { width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent2)); display: flex; align-items: center; justify-content: center; font-size: 36px; margin: 0 auto 14px; box-shadow: 0 0 40px rgba(124,111,255,0.3); }
-  .hero h1 { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 800; margin-bottom: 4px; }
-  .hero p { font-size: 13px; color: var(--muted); }
+/* ════════════════════════════════
+   HOME
+════════════════════════════════ */
+#home { padding-top:60px; }
 
-  /* STATS ROW */
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 16px 0; }
-  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 6px; text-align: center; }
-  .stat-val { font-family: 'Syne', sans-serif; font-size: 18px; font-weight: 700; color: var(--text); }
-  .stat-lbl { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px; }
+/* HERO */
+.hero {
+  min-height:calc(100vh - 60px);
+  display:grid; place-items:center;
+  padding:60px 32px;
+  position:relative; overflow:hidden;
+}
+.hero-bg {
+  position:absolute; inset:0; pointer-events:none;
+  background: radial-gradient(ellipse 60% 50% at 20% 50%, rgba(108,92,231,0.12) 0%, transparent 70%),
+              radial-gradient(ellipse 40% 40% at 80% 30%, rgba(253,121,168,0.1) 0%, transparent 70%);
+}
+.hero-grid {
+  display:grid; grid-template-columns:1fr 1fr;
+  gap:60px; align-items:center;
+  max-width:1100px; width:100%; position:relative;
+}
+.hero-left {}
+.hero-eyebrow {
+  display:inline-flex; align-items:center; gap:8px;
+  padding:5px 12px; border-radius:20px;
+  border:1px solid var(--border); background:var(--surface);
+  font-size:11px; font-weight:600; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--muted); margin-bottom:24px;
+}
+.hero-eyebrow span { width:6px; height:6px; border-radius:50%; background:var(--accent3); box-shadow:0 0 8px var(--accent3); }
+h1.hero-title {
+  font-family:var(--font-display); font-size:clamp(64px,9vw,110px);
+  line-height:.95; letter-spacing:1px;
+  margin-bottom:28px;
+}
+h1.hero-title em { font-style:normal; color:var(--accent); }
+.hero-desc { font-size:17px; line-height:1.65; color:var(--muted); max-width:460px; margin-bottom:36px; }
+.hero-actions { display:flex; gap:12px; flex-wrap:wrap; }
+.btn-primary {
+  display:inline-flex; align-items:center; gap:8px;
+  padding:14px 28px; border-radius:var(--r);
+  background:var(--ink); color:var(--paper);
+  font-size:14px; font-weight:600; border:none;
+  transition:transform .15s, opacity .15s;
+}
+.btn-primary:hover { transform:translateY(-1px); opacity:.9; }
+.btn-outline {
+  display:inline-flex; align-items:center; gap:8px;
+  padding:14px 28px; border-radius:var(--r);
+  background:transparent; color:var(--ink);
+  font-size:14px; font-weight:600;
+  border:1.5px solid var(--border);
+  transition:border-color .15s, background .15s;
+}
+.btn-outline:hover { border-color:var(--ink); background:var(--surface); }
 
-  /* FORM ELEMENTS */
-  .section-label { font-family: 'Syne', sans-serif; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin: 20px 0 10px; }
-  .field { margin-bottom: 12px; }
-  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
-  .field input, .field textarea, .field select {
-    width: 100%; background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius-sm); padding: 12px 14px; color: var(--text);
-    font-family: 'DM Sans', sans-serif; font-size: 14px; outline: none;
-    transition: border-color 0.2s;
-  }
-  .field input:focus, .field textarea:focus, .field select:focus { border-color: var(--accent); }
-  .field textarea { resize: none; height: 80px; }
-  .field select option { background: var(--surface); }
+/* PHONE MOCKUP */
+.hero-right { display:flex; justify-content:center; align-items:center; }
+.phone-wrap { position:relative; }
+.phone {
+  width:260px; background:var(--ghost);
+  border-radius:36px; padding:20px 16px;
+  border:1.5px solid var(--border);
+  box-shadow:0 40px 80px rgba(0,0,0,0.12), 0 0 0 6px var(--surface);
+  position:relative; overflow:hidden;
+}
+.phone-bar { display:flex; justify-content:center; margin-bottom:16px; }
+.phone-notch { width:60px; height:6px; background:var(--border); border-radius:3px; }
+.phone-header { display:flex; align-items:center; gap:10px; padding-bottom:12px; border-bottom:1px solid var(--border); margin-bottom:12px; }
+.phone-avatar { width:36px; height:36px; border-radius:50%; background:linear-gradient(135deg,var(--accent),var(--accent2)); display:flex; align-items:center; justify-content:center; font-size:16px; }
+.phone-name { font-size:13px; font-weight:600; }
+.phone-status { font-size:10px; color:var(--accent3); }
+.bubble { border-radius:14px; padding:9px 13px; font-size:12px; line-height:1.5; margin-bottom:8px; max-width:85%; }
+.bubble.them { background:var(--surface); border:1px solid var(--border); color:var(--ink); }
+.bubble.me { background:var(--accent); color:#fff; margin-left:auto; }
+.bubble.system { background:transparent; color:var(--muted); font-size:10px; text-align:center; margin:0 auto 8px; padding:4px; }
+.phone-input { display:flex; gap:8px; align-items:center; margin-top:12px; padding-top:12px; border-top:1px solid var(--border); }
+.phone-input-field { flex:1; background:var(--surface); border:1px solid var(--border); border-radius:20px; padding:7px 12px; font-size:11px; color:var(--muted); font-family:var(--font-body); }
+.phone-send { width:28px; height:28px; border-radius:50%; background:var(--accent); border:none; color:#fff; font-size:12px; display:flex; align-items:center; justify-content:center; }
 
-  /* TAGS */
-  .tags { display: flex; flex-wrap: wrap; gap: 8px; }
-  .tag { padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 500; border: 1px solid var(--border); color: var(--muted); cursor: pointer; transition: all 0.15s; background: var(--surface); user-select: none; }
-  .tag.on { border-color: var(--accent); color: var(--accent); background: rgba(124,111,255,0.1); }
-  .tag.max-warn { animation: shake 0.3s; }
+/* STATS BAR */
+.stats-bar {
+  display:grid; grid-template-columns:repeat(4,1fr);
+  border-top:1px solid var(--border); border-bottom:1px solid var(--border);
+}
+.stat-item { padding:32px 24px; border-right:1px solid var(--border); }
+.stat-item:last-child { border-right:none; }
+.stat-num { font-family:var(--font-display); font-size:48px; line-height:1; margin-bottom:6px; }
+.stat-num span { color:var(--accent); }
+.stat-label { font-size:13px; color:var(--muted); }
 
-  /* MOOD PILLS */
-  .moods { display: flex; flex-wrap: wrap; gap: 8px; }
-  .mood { padding: 8px 16px; border-radius: 20px; font-size: 13px; border: 1px solid var(--border); cursor: pointer; transition: all 0.15s; background: var(--surface); color: var(--muted); }
-  .mood.on { border-color: var(--accent2); color: var(--accent2); background: rgba(255,107,157,0.1); }
+/* FEATURES */
+.features { padding:100px 32px; max-width:1100px; margin:0 auto; }
+.section-eyebrow { font-size:11px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--accent); margin-bottom:16px; }
+.section-title { font-family:var(--font-display); font-size:clamp(40px,5vw,64px); line-height:1; margin-bottom:60px; }
+.features-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:2px; }
+.feat { padding:36px 32px; background:var(--surface); border:1px solid var(--border); position:relative; overflow:hidden; transition:background .2s; }
+.feat:hover { background:var(--ghost); }
+.feat-num { font-family:var(--font-display); font-size:80px; color:var(--border); position:absolute; top:-10px; right:16px; line-height:1; pointer-events:none; }
+.feat-icon { font-size:28px; margin-bottom:16px; }
+.feat-title { font-size:16px; font-weight:600; margin-bottom:10px; }
+.feat-desc { font-size:13px; line-height:1.7; color:var(--muted); }
 
-  /* GENDER */
-  .gender-row { display: flex; gap: 10px; }
-  .gender-btn { flex: 1; padding: 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface); color: var(--muted); font-size: 13px; cursor: pointer; text-align: center; transition: all 0.15s; }
-  .gender-btn.on { border-color: var(--accent3); color: var(--accent3); background: rgba(107,255,184,0.1); }
+/* MARQUEE */
+.marquee-wrap { overflow:hidden; border-top:1px solid var(--border); border-bottom:1px solid var(--border); padding:14px 0; background:var(--ink); }
+.marquee-track { display:flex; gap:0; white-space:nowrap; animation:marquee 30s linear infinite; }
+.marquee-item { display:inline-flex; align-items:center; gap:16px; padding:0 24px; font-family:var(--font-display); font-size:18px; color:var(--paper); opacity:.6; letter-spacing:1px; }
+.marquee-dot { width:6px; height:6px; border-radius:50%; background:var(--accent); opacity:1; }
+@keyframes marquee { to { transform:translateX(-50%); } }
 
-  /* PRIMARY BUTTON */
-  .btn-primary { width: 100%; padding: 15px; border-radius: var(--radius); background: linear-gradient(135deg, var(--accent), var(--accent2)); color: white; font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 700; border: none; cursor: pointer; letter-spacing: 0.04em; transition: opacity 0.15s, transform 0.1s; }
-  .btn-primary:active { transform: scale(0.98); opacity: 0.9; }
-  .btn-secondary { width: 100%; padding: 13px; border-radius: var(--radius); background: transparent; color: var(--accent); font-family: 'Syne', sans-serif; font-size: 14px; font-weight: 600; border: 1px solid var(--accent); cursor: pointer; transition: all 0.15s; margin-top: 10px; }
-  .btn-secondary:active { background: rgba(124,111,255,0.1); }
+/* HOW IT WORKS */
+.how { padding:100px 32px; max-width:1100px; margin:0 auto; }
+.how-steps { display:grid; grid-template-columns:repeat(3,1fr); gap:40px; margin-top:60px; }
+.step { display:flex; flex-direction:column; gap:16px; }
+.step-num { font-family:var(--font-display); font-size:72px; color:var(--border); line-height:1; }
+.step-title { font-size:18px; font-weight:600; }
+.step-desc { font-size:14px; color:var(--muted); line-height:1.7; }
+.step-connector { display:none; }
 
-  /* REFERRAL BOX */
-  .ref-box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; display: flex; align-items: center; gap: 12px; }
-  .ref-link { font-size: 12px; color: var(--muted); font-family: monospace; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .copy-btn { padding: 6px 14px; border-radius: 8px; background: var(--accent); color: white; font-size: 12px; font-weight: 600; border: none; cursor: pointer; flex-shrink: 0; }
+/* FAQ */
+.faq-section { padding:100px 32px; max-width:700px; margin:0 auto; }
+.faq-item { border-top:1px solid var(--border); }
+.faq-q {
+  width:100%; display:flex; justify-content:space-between; align-items:center;
+  padding:22px 0; font-size:15px; font-weight:500;
+  background:none; border:none; color:var(--ink); text-align:left; gap:20px;
+  cursor:pointer;
+}
+.faq-q .faq-icon { font-size:20px; color:var(--muted); transition:transform .25s; flex-shrink:0; }
+.faq-q.open .faq-icon { transform:rotate(45deg); }
+.faq-a { font-size:14px; color:var(--muted); line-height:1.8; padding-bottom:22px; display:none; }
+.faq-a.open { display:block; }
 
-  /* GAMES GRID */
-  .games-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .game-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 14px; cursor: pointer; transition: border-color 0.15s, transform 0.1s; }
-  .game-card:active { transform: scale(0.97); }
-  .game-card:hover { border-color: var(--accent); }
-  .game-emoji { font-size: 32px; margin-bottom: 10px; }
-  .game-name { font-family: 'Syne', sans-serif; font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
-  .game-sub { font-size: 11px; color: var(--muted); }
-  .game-badge { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 6px; background: rgba(107,255,184,0.15); color: var(--accent3); font-weight: 600; margin-top: 8px; }
-  .game-badge.soon { background: rgba(255,255,255,0.05); color: var(--muted); }
+/* CTA */
+.cta-section {
+  margin:0 32px 80px; border-radius:24px;
+  background:var(--ink); color:var(--paper);
+  padding:80px; text-align:center; overflow:hidden; position:relative;
+}
+.cta-section::before {
+  content:''; position:absolute; inset:0;
+  background: radial-gradient(ellipse 60% 80% at 50% 100%, rgba(108,92,231,0.3) 0%, transparent 70%);
+}
+.cta-title { font-family:var(--font-display); font-size:clamp(40px,6vw,72px); margin-bottom:20px; position:relative; }
+.cta-desc { font-size:16px; opacity:.6; margin-bottom:36px; position:relative; }
+.cta-btn { display:inline-flex; align-items:center; gap:10px; padding:16px 32px; border-radius:var(--r); background:var(--paper); color:var(--ink); font-size:15px; font-weight:700; border:none; position:relative; transition:transform .15s; }
+.cta-btn:hover { transform:scale(1.03); }
 
-  /* LEADERBOARD */
-  .lb-row { display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 8px; }
-  .lb-rank { font-family: 'Syne', sans-serif; font-size: 16px; font-weight: 800; width: 28px; text-align: center; flex-shrink: 0; }
-  .lb-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--surface2); display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
-  .lb-name { font-size: 13px; font-weight: 500; flex: 1; }
-  .lb-stat { font-size: 11px; color: var(--muted); }
-  .lb-score { font-family: 'Syne', sans-serif; font-size: 14px; font-weight: 700; color: var(--accent); }
+/* FOOTER */
+footer { border-top:1px solid var(--border); padding:32px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px; }
+.footer-logo { font-family:var(--font-display); font-size:18px; }
+.footer-links { display:flex; gap:20px; }
+.footer-links a { font-size:13px; color:var(--muted); transition:color .15s; }
+.footer-links a:hover { color:var(--ink); }
+.footer-copy { font-size:12px; color:var(--muted); font-family:var(--font-mono); }
 
-  /* SUCCESS TOAST */
-  .toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%) translateY(20px); background: var(--accent3); color: #0a1a12; padding: 10px 20px; border-radius: 20px; font-size: 13px; font-weight: 600; opacity: 0; transition: all 0.3s; pointer-events: none; z-index: 100; }
-  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+/* ════════════════════════════════
+   DASHBOARD
+════════════════════════════════ */
+#dashboard { padding-top:60px; min-height:100vh; }
+.dash-wrap { display:flex; min-height:calc(100vh - 60px); }
 
-  /* BOTTOM NAV */
-  .bottomnav { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 430px; background: var(--bg); border-top: 1px solid var(--border); display: flex; padding: 8px 0 20px; z-index: 10; }
-  .bnav-btn { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; padding: 6px 0; }
-  .bnav-icon { font-size: 20px; }
-  .bnav-lbl { font-size: 9px; font-weight: 600; font-family: 'Syne', sans-serif; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
-  .bnav-btn.active .bnav-lbl { color: var(--accent); }
-  .bnav-btn.active .bnav-icon { filter: drop-shadow(0 0 6px var(--accent)); }
+/* SIDEBAR */
+.dash-sidebar {
+  width:220px; flex-shrink:0;
+  border-right:1px solid var(--border);
+  padding:24px 0; position:sticky;
+  top:60px; height:calc(100vh - 60px);
+  overflow-y:auto;
+}
+.dash-nav-section { padding:0 16px; margin-bottom:24px; }
+.dash-nav-label { font-size:10px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); padding:0 8px; margin-bottom:8px; }
+.dash-nav-item {
+  display:flex; align-items:center; gap:10px;
+  padding:9px 12px; border-radius:8px; font-size:13px; font-weight:500;
+  color:var(--muted); cursor:pointer; transition:all .15s; border:none;
+  background:none; width:100%; text-align:left;
+}
+.dash-nav-item:hover { color:var(--ink); background:var(--surface); }
+.dash-nav-item.active { color:var(--ink); background:var(--surface); font-weight:600; }
+.dash-nav-item .nav-icon { font-size:15px; }
+.dash-badge { margin-left:auto; font-size:10px; padding:2px 7px; border-radius:10px; background:var(--accent); color:#fff; font-weight:700; }
 
-  @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-4px)} 75%{transform:translateX(4px)} }
-  @keyframes fadeIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
-  .screen.active { animation: fadeIn 0.25s ease; }
+/* MAIN CONTENT */
+.dash-main { flex:1; overflow:auto; }
+.dash-panel { display:none; padding:32px; }
+.dash-panel.active { display:block; }
 
-  /* STREAK BANNER */
-  .streak-banner { background: linear-gradient(135deg, rgba(124,111,255,0.15), rgba(255,107,157,0.15)); border: 1px solid rgba(124,111,255,0.25); border-radius: var(--radius); padding: 14px 16px; display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-  .streak-num { font-family: 'Syne', sans-serif; font-size: 28px; font-weight: 800; color: var(--accent); }
-  .streak-text { font-size: 13px; color: var(--muted); }
-  .streak-text strong { color: var(--text); display: block; font-size: 14px; }
+.dash-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:28px; }
+.dash-title { font-family:var(--font-display); font-size:36px; line-height:1; }
+.dash-subtitle { font-size:13px; color:var(--muted); margin-top:4px; }
 
-  /* AI STATUS */
-  .ai-status { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-  .ai-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent3); box-shadow: 0 0 8px var(--accent3); flex-shrink: 0; }
-  .ai-dot.off { background: var(--muted); box-shadow: none; }
-  .ai-label { font-size: 13px; flex: 1; }
-  .ai-toggle { width: 44px; height: 24px; border-radius: 12px; border: none; cursor: pointer; position: relative; transition: background 0.2s; flex-shrink: 0; }
-  .ai-toggle.on { background: var(--accent3); }
-  .ai-toggle.off { background: var(--border); }
-  .ai-toggle::after { content: ''; position: absolute; width: 18px; height: 18px; border-radius: 50%; background: white; top: 3px; transition: left 0.2s; }
-  .ai-toggle.on::after { left: 23px; }
-  .ai-toggle.off::after { left: 3px; }
+/* METRIC CARDS */
+.metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:24px; }
+.metric {
+  background:var(--ghost); border:1px solid var(--border);
+  border-radius:var(--r); padding:20px;
+}
+.metric-val { font-family:var(--font-display); font-size:36px; line-height:1; margin-bottom:4px; }
+.metric-label { font-size:12px; color:var(--muted); }
+.metric-change { font-size:11px; margin-top:8px; display:flex; align-items:center; gap:4px; }
+.metric-change.up { color:#00b894; }
+.metric-change.down { color:#d63031; }
+
+/* GRID 2 COL */
+.grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
+.grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; margin-bottom:16px; }
+
+/* CARD */
+.card { background:var(--ghost); border:1px solid var(--border); border-radius:var(--r); padding:20px; }
+.card-title { font-size:13px; font-weight:600; margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; }
+.card-title span { color:var(--muted); font-weight:400; font-size:12px; }
+
+/* TABLE */
+.data-table { width:100%; border-collapse:collapse; font-size:12px; }
+.data-table th { text-align:left; padding:8px 12px; color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.05em; border-bottom:1px solid var(--border); }
+.data-table td { padding:10px 12px; border-bottom:1px solid var(--border); }
+.data-table tr:last-child td { border-bottom:none; }
+.data-table tr:hover td { background:var(--surface); }
+
+/* BADGES */
+.badge { display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:600; padding:3px 8px; border-radius:6px; }
+.badge-green { background:rgba(0,184,148,0.12); color:#00b894; }
+.badge-red { background:rgba(214,48,49,0.12); color:#d63031; }
+.badge-yellow { background:rgba(253,203,110,0.15); color:#e17055; }
+.badge-purple { background:rgba(108,92,231,0.12); color:var(--accent); }
+.badge-dot { width:5px; height:5px; border-radius:50%; background:currentColor; }
+
+/* LIVE INDICATOR */
+.live-dot { width:8px; height:8px; border-radius:50%; background:#00b894; box-shadow:0 0 8px #00b894; animation:pulse 2s infinite; display:inline-block; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+/* PROGRESS BAR */
+.progress-bar { height:4px; background:var(--border); border-radius:2px; overflow:hidden; margin-top:8px; }
+.progress-fill { height:100%; border-radius:2px; transition:width .5s; }
+
+/* BOT STATUS CARD */
+.bot-card { display:flex; align-items:center; gap:14px; padding:14px 16px; border:1px solid var(--border); border-radius:var(--r); background:var(--ghost); margin-bottom:10px; }
+.bot-icon { width:40px; height:40px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:18px; flex-shrink:0; }
+.bot-info { flex:1; }
+.bot-name { font-size:13px; font-weight:600; }
+.bot-meta { font-size:11px; color:var(--muted); margin-top:2px; }
+.bot-actions { display:flex; align-items:center; gap:8px; }
+
+/* TOGGLE */
+.toggle { width:40px; height:22px; border-radius:11px; border:none; cursor:pointer; position:relative; transition:background .2s; flex-shrink:0; }
+.toggle.on { background:var(--accent3); }
+.toggle.off { background:var(--border); }
+.toggle::after { content:''; position:absolute; width:16px; height:16px; border-radius:50%; background:white; top:3px; transition:left .2s; box-shadow:0 1px 3px rgba(0,0,0,.2); }
+.toggle.on::after { left:21px; }
+.toggle.off::after { left:3px; }
+
+/* BROADCAST */
+.broadcast-box { background:var(--ghost); border:1px solid var(--border); border-radius:var(--r); padding:20px; }
+.broadcast-textarea { width:100%; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:12px; font-size:13px; font-family:var(--font-body); color:var(--ink); resize:none; height:100px; outline:none; transition:border-color .15s; }
+.broadcast-textarea:focus { border-color:var(--accent); }
+.broadcast-footer { display:flex; align-items:center; justify-content:space-between; margin-top:12px; }
+.broadcast-count { font-size:12px; color:var(--muted); }
+.btn-send { display:flex; align-items:center; gap:8px; padding:9px 18px; border-radius:8px; background:var(--accent); color:#fff; font-size:13px; font-weight:600; border:none; transition:opacity .15s; }
+.btn-send:hover { opacity:.85; }
+
+/* USER LOOKUP */
+.lookup-row { display:flex; gap:10px; margin-bottom:16px; }
+.lookup-input { flex:1; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:10px 14px; font-size:13px; font-family:var(--font-body); color:var(--ink); outline:none; }
+.lookup-input:focus { border-color:var(--accent); }
+.btn-search { padding:10px 20px; border-radius:8px; background:var(--ink); color:var(--paper); font-size:13px; font-weight:600; border:none; }
+
+/* ACTIVITY FEED */
+.activity-item { display:flex; gap:12px; padding:12px 0; border-bottom:1px solid var(--border); }
+.activity-item:last-child { border-bottom:none; }
+.activity-icon { width:32px; height:32px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:14px; flex-shrink:0; }
+.activity-text { font-size:12px; line-height:1.5; }
+.activity-time { font-size:10px; color:var(--muted); margin-top:3px; font-family:var(--font-mono); }
+
+/* MINI CHART (pure CSS) */
+.chart-bars { display:flex; align-items:flex-end; gap:4px; height:60px; margin-top:12px; }
+.bar { flex:1; border-radius:3px 3px 0 0; background:var(--accent); opacity:.3; transition:opacity .15s; min-height:4px; }
+.bar:hover { opacity:1; }
+.bar.today { opacity:.8; }
+
+/* SETTINGS FORM */
+.settings-group { margin-bottom:28px; }
+.settings-label { font-size:13px; font-weight:600; margin-bottom:4px; }
+.settings-hint { font-size:12px; color:var(--muted); margin-bottom:12px; }
+.settings-input { width:100%; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:10px 14px; font-size:13px; font-family:var(--font-body); color:var(--ink); outline:none; }
+.settings-input:focus { border-color:var(--accent); }
+.settings-row { display:flex; align-items:center; justify-content:space-between; padding:14px 0; border-bottom:1px solid var(--border); }
+.settings-row-label { font-size:13px; font-weight:500; }
+.settings-row-desc { font-size:12px; color:var(--muted); margin-top:2px; }
+
+/* ── RESPONSIVE ── */
+@media(max-width:900px) {
+  .hero-grid { grid-template-columns:1fr; }
+  .hero-right { display:none; }
+  .stats-bar { grid-template-columns:1fr 1fr; }
+  .features-grid { grid-template-columns:1fr; }
+  .how-steps { grid-template-columns:1fr; }
+  .metrics { grid-template-columns:1fr 1fr; }
+  .grid-2,.grid-3 { grid-template-columns:1fr; }
+  .dash-sidebar { display:none; }
+  nav { padding:0 20px; }
+  .nav-links { display:none; }
+}
+
+/* ── ANIMATIONS ── */
+@keyframes fadeUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+.hero-left > * { animation:fadeUp .6s ease both; }
+.hero-left > *:nth-child(1) { animation-delay:.1s; }
+.hero-left > *:nth-child(2) { animation-delay:.2s; }
+.hero-left > *:nth-child(3) { animation-delay:.3s; }
+.hero-left > *:nth-child(4) { animation-delay:.4s; }
 </style>
 </head>
 <body>
-<div class="app">
 
-  <!-- TOP TABS -->
-  <div class="topnav">
-    <div class="tab active" onclick="goScreen('home',this)">Home</div>
-    <div class="tab" onclick="goScreen('profile',this)">Profile</div>
-    <div class="tab" onclick="goScreen('games',this)">Games</div>
-    <div class="tab" onclick="goScreen('leaderboard',this)">Ranks</div>
+<!-- ══ NAV ══ -->
+<nav>
+  <div class="nav-logo">
+    <div class="ghost-dot">👻</div>
+    GhostTalk
   </div>
-
-  <!-- ═══ HOME ═══ -->
-  <div class="screen active" id="screen-home">
-    <div class="hero">
-      <div class="ghost-avatar">👻</div>
-      <h1>GhostTalk</h1>
-      <p>Anonymous chats • Real connections</p>
-    </div>
-
-    <div class="stats">
-      <div class="stat"><div class="stat-val" id="s-chats">42</div><div class="stat-lbl">Chats</div></div>
-      <div class="stat"><div class="stat-val" id="s-msgs">318</div><div class="stat-lbl">Messages</div></div>
-      <div class="stat"><div class="stat-val" id="s-streak">7</div><div class="stat-lbl">Streak</div></div>
-      <div class="stat"><div class="stat-val" id="s-rating">4.2</div><div class="stat-lbl">Rating</div></div>
-    </div>
-
-    <div class="streak-banner">
-      <div class="streak-num" id="streak-big">7</div>
-      <div class="streak-text"><strong>Day streak!</strong>Keep chatting daily to keep it going.</div>
-    </div>
-
-    <!-- AI Fallback toggle -->
-    <div class="section-label">AI Partner</div>
-    <div class="ai-status">
-      <div class="ai-dot on" id="ai-dot"></div>
-      <div class="ai-label">
-        <strong style="font-size:13px;display:block;">AI Fallback</strong>
-        <span style="font-size:11px;color:var(--muted)">Chat with AI when no humans available</span>
-      </div>
-      <button class="ai-toggle on" id="ai-toggle" onclick="toggleAI()"></button>
-    </div>
-
-    <div class="section-label">Referral link</div>
-    <div class="ref-box">
-      <span class="ref-link" id="ref-link">t.me/IamDinkyBot?start=ref_A3F9C2</span>
-      <button class="copy-btn" onclick="copyRef()">Copy</button>
-    </div>
-    <div style="font-size:11px;color:var(--muted);margin-top:8px;text-align:center">👥 <span id="ref-count">3</span> friends referred • Every 3 = +1 VIP day</div>
-
-    <div style="margin-top:20px">
-      <button class="btn-primary" onclick="openChat()">Find a Partner</button>
-      <button class="btn-secondary" onclick="goScreen('profile', document.querySelectorAll('.tab')[1])">Edit Profile</button>
-    </div>
+  <div class="nav-links">
+    <a href="#" class="active" onclick="showSection('home',this)">Home</a>
+    <a href="#" onclick="showSection('home',this); scrollTo('#features')">Features</a>
+    <a href="#" onclick="showSection('home',this); scrollTo('#faq')">FAQ</a>
+    <a href="#" onclick="showSection('dashboard',this)">Dashboard</a>
   </div>
-
-  <!-- ═══ PROFILE ═══ -->
-  <div class="screen" id="screen-profile">
-    <div class="section-label">Identity</div>
-
-    <div class="field">
-      <label>Nickname (shown to partner, not your real name)</label>
-      <input type="text" id="f-name" placeholder="e.g. Night Owl, Stardust, CuriousMind..." maxlength="24"/>
-    </div>
-    <div class="field">
-      <label>Age (optional)</label>
-      <input type="number" id="f-age" placeholder="e.g. 21" min="13" max="99"/>
-    </div>
-    <div class="field">
-      <label>Bio (shown to partner before chat)</label>
-      <textarea id="f-bio" placeholder="Write something mysterious... Who are you without your name?"></textarea>
-    </div>
-
-    <div class="section-label">Gender</div>
-    <div class="gender-row" id="gender-row">
-      <div class="gender-btn" onclick="setGender(this,'male')">♂ Male</div>
-      <div class="gender-btn" onclick="setGender(this,'female')">♀ Female</div>
-      <div class="gender-btn" onclick="setGender(this,'other')">⚧ Other</div>
-      <div class="gender-btn" onclick="setGender(this,'none')">— Private</div>
-    </div>
-
-    <div class="section-label">Mood right now</div>
-    <div class="moods" id="moods">
-      <div class="mood" onclick="setMood(this)">😊 Happy</div>
-      <div class="mood" onclick="setMood(this)">😔 Sad</div>
-      <div class="mood" onclick="setMood(this)">🤔 Philosophical</div>
-      <div class="mood on" onclick="setMood(this)">😎 Chill</div>
-      <div class="mood" onclick="setMood(this)">🔥 Flirty</div>
-      <div class="mood" onclick="setMood(this)">😂 Funny</div>
-      <div class="mood" onclick="setMood(this)">💪 Motivated</div>
-    </div>
-
-    <div class="section-label">Interests <span style="color:var(--muted);font-weight:400;font-size:10px">(pick up to 5)</span></div>
-    <div class="tags" id="tags">
-      <div class="tag on" onclick="toggleTag(this)">🎵 Music</div>
-      <div class="tag on" onclick="toggleTag(this)">🎮 Gaming</div>
-      <div class="tag" onclick="toggleTag(this)">📚 Books</div>
-      <div class="tag" onclick="toggleTag(this)">💻 Tech</div>
-      <div class="tag on" onclick="toggleTag(this)">🎬 Movies</div>
-      <div class="tag" onclick="toggleTag(this)">🏋️ Fitness</div>
-      <div class="tag" onclick="toggleTag(this)">🎨 Art</div>
-      <div class="tag" onclick="toggleTag(this)">✈️ Travel</div>
-      <div class="tag" onclick="toggleTag(this)">🍕 Food</div>
-      <div class="tag" onclick="toggleTag(this)">💰 Crypto</div>
-      <div class="tag" onclick="toggleTag(this)">🌿 Nature</div>
-      <div class="tag" onclick="toggleTag(this)">🧠 Philosophy</div>
-    </div>
-
-    <div class="section-label">Language preference</div>
-    <div class="field">
-      <select id="f-lang">
-        <option value="any">Any language</option>
-        <option value="english">English</option>
-        <option value="hindi">Hindi</option>
-        <option value="spanish">Spanish</option>
-        <option value="arabic">Arabic</option>
-        <option value="russian">Russian</option>
-        <option value="french">French</option>
-      </select>
-    </div>
-
-    <div style="margin-top:8px">
-      <button class="btn-primary" onclick="saveProfile()">Save Profile</button>
-    </div>
+  <div class="nav-right">
+    <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+    <a href="https://t.me/IamDinkybot" target="_blank" class="btn-tg">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.248l-2.013 9.484c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L8.48 14.607l-2.95-.924c-.642-.2-.655-.642.136-.953l11.527-4.445c.537-.194 1.006.131.37.963z"/></svg>
+      Open Bot
+    </a>
   </div>
+</nav>
 
-  <!-- ═══ GAMES ═══ -->
-  <div class="screen" id="screen-games">
-    <div class="section-label">Play with your partner</div>
-    <div class="games-grid">
-      <div class="game-card" onclick="launchGame('trivia')">
-        <div class="game-emoji">🧠</div>
-        <div class="game-name">Trivia</div>
-        <div class="game-sub">First to answer wins</div>
-        <div class="game-badge">Live</div>
+<!-- ══════════════════════════════
+     HOME SECTION
+══════════════════════════════ -->
+<section id="home" class="active">
+
+  <!-- HERO -->
+  <div class="hero">
+    <div class="hero-bg"></div>
+    <div class="hero-grid">
+      <div class="hero-left">
+        <div class="hero-eyebrow"><span></span> Anonymous · Instant · Free</div>
+        <h1 class="hero-title">Talk to<br/><em>Strangers</em><br/>Freely.</h1>
+        <p class="hero-desc">GhostTalk connects you with real people worldwide — anonymously, instantly, safely. No account. No trace. Just conversation.</p>
+        <div class="hero-actions">
+          <a href="https://t.me/IamDinkybot" target="_blank" class="btn-primary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.248l-2.013 9.484c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L8.48 14.607l-2.95-.924c-.642-.2-.655-.642.136-.953l11.527-4.445c.537-.194 1.006.131.37.963z"/></svg>
+            Start Chatting Free
+          </a>
+          <button class="btn-outline" onclick="showSection('dashboard'); document.querySelectorAll('.nav-links a')[3].classList.add('active')">
+            View Dashboard →
+          </button>
+        </div>
       </div>
-      <div class="game-card" onclick="launchGame('wyr')">
-        <div class="game-emoji">🤔</div>
-        <div class="game-name">Would You Rather</div>
-        <div class="game-sub">Tough dilemmas</div>
-        <div class="game-badge">Live</div>
-      </div>
-      <div class="game-card" onclick="launchGame('tod')">
-        <div class="game-emoji">🎲</div>
-        <div class="game-name">Truth or Dare</div>
-        <div class="game-sub">Classic party game</div>
-        <div class="game-badge">Live</div>
-      </div>
-      <div class="game-card" onclick="launchGame('wordchain')">
-        <div class="game-emoji">🔤</div>
-        <div class="game-name">Word Chain</div>
-        <div class="game-sub">Endless vocab game</div>
-        <div class="game-badge">Live</div>
-      </div>
-      <div class="game-card" onclick="launchGame('draw')">
-        <div class="game-emoji">🎨</div>
-        <div class="game-name">Guess Drawing</div>
-        <div class="game-sub">Draw & guess</div>
-        <div class="game-badge soon">Soon</div>
-      </div>
-      <div class="game-card" onclick="launchGame('quiz')">
-        <div class="game-emoji">🎯</div>
-        <div class="game-name">Personality Quiz</div>
-        <div class="game-sub">Know your partner</div>
-        <div class="game-badge soon">Soon</div>
+      <div class="hero-right">
+        <div class="phone-wrap">
+          <div class="phone">
+            <div class="phone-bar"><div class="phone-notch"></div></div>
+            <div class="phone-header">
+              <div class="phone-avatar">👻</div>
+              <div>
+                <div class="phone-name">Anonymous #4821</div>
+                <div class="phone-status">● online</div>
+              </div>
+            </div>
+            <div class="bubble system">🦋 Partner found! Say hi 👋</div>
+            <div class="bubble them">hey! so what are you into?</div>
+            <div class="bubble me">music mostly, you?</div>
+            <div class="bubble them">same! what genre?</div>
+            <div class="bubble me">anything with a good beat 🎵</div>
+            <div class="bubble them">ok we're already best friends lol</div>
+            <div class="phone-input">
+              <div class="phone-input-field">Type a message...</div>
+              <div class="phone-send">➤</div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
 
-  <!-- ═══ LEADERBOARD ═══ -->
-  <div class="screen" id="screen-leaderboard">
-    <div class="section-label">Top Chatters</div>
-    <div id="lb-list">
-      <div class="lb-row"><div class="lb-rank">🥇</div><div class="lb-avatar">👻</div><div class="lb-name">NightOwl<div class="lb-stat">💬 98 chats • 🔥 21d</div></div><div class="lb-score">4.9★</div></div>
-      <div class="lb-row"><div class="lb-rank">🥈</div><div class="lb-avatar">🌙</div><div class="lb-name">Stargazer<div class="lb-stat">💬 76 chats • 🔥 14d</div></div><div class="lb-score">4.7★</div></div>
-      <div class="lb-row"><div class="lb-rank">🥉</div><div class="lb-avatar">🔮</div><div class="lb-name">PhilosoFox<div class="lb-stat">💬 64 chats • 🔥 9d</div></div><div class="lb-score">4.6★</div></div>
-      <div class="lb-row"><div class="lb-rank" style="color:var(--muted);font-size:13px">4</div><div class="lb-avatar">⚡</div><div class="lb-name">SpeedTalker<div class="lb-stat">💬 58 chats • 🔥 7d</div></div><div class="lb-score">4.4★</div></div>
-      <div class="lb-row"><div class="lb-rank" style="color:var(--muted);font-size:13px">5</div><div class="lb-avatar">🎭</div><div class="lb-name">MaskOn<div class="lb-stat">💬 51 chats • 🔥 5d</div></div><div class="lb-score">4.2★</div></div>
-    </div>
-    <div style="margin-top:16px;text-align:center;font-size:12px;color:var(--muted)">Rankings update every hour</div>
+  <!-- STATS BAR -->
+  <div class="stats-bar">
+    <div class="stat-item"><div class="stat-num" id="stat-users">0<span>+</span></div><div class="stat-label">Total Users</div></div>
+    <div class="stat-item"><div class="stat-num" id="stat-chats">0<span>+</span></div><div class="stat-label">Chats Completed</div></div>
+    <div class="stat-item"><div class="stat-num"><span id="stat-active">0</span></div><div class="stat-label"><span class="live-dot"></span> Active Right Now</div></div>
+    <div class="stat-item"><div class="stat-num">100<span>%</span></div><div class="stat-label">Anonymous</div></div>
   </div>
 
-  <!-- BOTTOM NAV -->
-  <div class="bottomnav">
-    <div class="bnav-btn active" onclick="goScreen('home',null,this)" id="bn-home">
-      <div class="bnav-icon">🏠</div><div class="bnav-lbl">Home</div>
-    </div>
-    <div class="bnav-btn" onclick="goScreen('profile',null,this)" id="bn-profile">
-      <div class="bnav-icon">👤</div><div class="bnav-lbl">Profile</div>
-    </div>
-    <div class="bnav-btn" onclick="goScreen('games',null,this)" id="bn-games">
-      <div class="bnav-icon">🎮</div><div class="bnav-lbl">Games</div>
-    </div>
-    <div class="bnav-btn" onclick="goScreen('leaderboard',null,this)" id="bn-leaderboard">
-      <div class="bnav-icon">🏆</div><div class="bnav-lbl">Ranks</div>
+  <!-- MARQUEE -->
+  <div class="marquee-wrap">
+    <div class="marquee-track" id="marquee">
+      <div class="marquee-item"><span class="marquee-dot"></span>ANONYMOUS CHAT</div>
+      <div class="marquee-item"><span class="marquee-dot"></span>TALK TO STRANGERS</div>
+      <div class="marquee-item"><span class="marquee-dot"></span>MATCH BY MOOD</div>
+      <div class="marquee-item"><span class="marquee-dot"></span>INTEREST MATCHING</div>
+      <div class="marquee-item"><span class="marquee-dot"></span>MINI GAMES</div>
+      <div class="marquee-item"><span class="marquee-dot"></span>AI PARTNER</div>
+      <div class="marquee-item"><span class="marquee-dot"></span>ZERO REGISTRATION</div>
+      <div class="marquee-item"><span class="marquee-dot"></span>100% PRIVATE</div>
+      <div class="marquee-item"><span class="marquee-dot"></span>ANONYMOUS CHAT</div>
+      <div class="marquee-item"><span class="marquee-dot"></span>TALK TO STRANGERS</div>
+      <div class="marquee-item"><span class="marquee-dot"></span>MATCH BY MOOD</div>
+      <div class="marquee-item"><span class="marquee-dot"></span>INTEREST MATCHING</div>
+      <div class="marquee-item"><span class="marquee-dot"></span>MINI GAMES</div>
+      <div class="marquee-item"><span class="marquee-dot"></span>AI PARTNER</div>
+      <div class="marquee-item"><span class="marquee-dot"></span>ZERO REGISTRATION</div>
+      <div class="marquee-item"><span class="marquee-dot"></span>100% PRIVATE</div>
     </div>
   </div>
-</div>
 
-<!-- TOAST -->
-<div class="toast" id="toast"></div>
+  <!-- FEATURES -->
+  <div class="features" id="features">
+    <div class="section-eyebrow">What makes us different</div>
+    <div class="section-title">Built for real<br/>conversations.</div>
+    <div class="features-grid">
+      <div class="feat"><div class="feat-num">01</div><div class="feat-icon">🎭</div><div class="feat-title">Smart Matching</div><div class="feat-desc">Match by mood, interests, gender or language. Our algorithm finds the most compatible partner for you.</div></div>
+      <div class="feat"><div class="feat-num">02</div><div class="feat-icon">🔒</div><div class="feat-title">Total Privacy</div><div class="feat-desc">Zero personal data stored. Your Telegram ID never persists. Messages are forwarded live and never logged.</div></div>
+      <div class="feat"><div class="feat-num">03</div><div class="feat-icon">🎮</div><div class="feat-title">Mini Games</div><div class="feat-desc">Break the ice with Trivia, Would You Rather, Truth or Dare, and Word Chain — all playable inside the chat.</div></div>
+      <div class="feat"><div class="feat-num">04</div><div class="feat-icon">🤖</div><div class="feat-title">AI Fallback</div><div class="feat-desc">No humans online? Our AI partner steps in — so entertaining you might not even notice the difference.</div></div>
+      <div class="feat"><div class="feat-num">05</div><div class="feat-icon">🔥</div><div class="feat-title">Streaks & Ranks</div><div class="feat-desc">Daily streaks, leaderboards and ratings keep you coming back. The more you chat, the higher you climb.</div></div>
+      <div class="feat"><div class="feat-num">06</div><div class="feat-icon">🛡️</div><div class="feat-title">Auto Moderation</div><div class="feat-desc">AI-powered content moderation detects threats, hate speech and violations in real time — before they reach your partner.</div></div>
+    </div>
+  </div>
+
+  <!-- HOW IT WORKS -->
+  <div class="how">
+    <div class="section-eyebrow">How it works</div>
+    <div class="section-title">Three steps<br/>to a conversation.</div>
+    <div class="how-steps">
+      <div class="step"><div class="step-num">01</div><div class="step-title">Open the bot</div><div class="step-desc">Tap the Telegram button. No sign-up, no email, no phone number needed. Your anonymous ID is created instantly.</div></div>
+      <div class="step"><div class="step-num">02</div><div class="step-title">Set your vibe</div><div class="step-desc">Choose your mood and interests, or just go random. The bot finds a partner in seconds.</div></div>
+      <div class="step"><div class="step-num">03</div><div class="step-title">Start talking</div><div class="step-desc">Chat freely. Play games. When you're done, press Next to meet someone new instantly.</div></div>
+    </div>
+  </div>
+
+  <!-- FAQ -->
+  <div class="faq-section" id="faq">
+    <div class="section-eyebrow">FAQ</div>
+    <div class="section-title" style="font-size:clamp(32px,4vw,48px);margin-bottom:40px;">Common questions.</div>
+    <div id="faq-list"></div>
+  </div>
+
+  <!-- CTA -->
+  <div class="cta-section">
+    <div class="cta-title">Ready to talk<br/>to a stranger?</div>
+    <p class="cta-desc">Join thousands of people having real, anonymous conversations right now.</p>
+    <a href="https://t.me/IamDinkybot" target="_blank" class="cta-btn">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.248l-2.013 9.484c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L8.48 14.607l-2.95-.924c-.642-.2-.655-.642.136-.953l11.527-4.445c.537-.194 1.006.131.37.963z"/></svg>
+      Open GhostTalk on Telegram
+    </a>
+  </div>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="footer-logo">👻 GhostTalk</div>
+    <div class="footer-links">
+      <a href="#">Privacy</a>
+      <a href="#">Rules</a>
+      <a href="https://t.me/IamDinkybot" target="_blank">Telegram</a>
+      <a href="#" onclick="showSection('dashboard')">Dashboard</a>
+    </div>
+    <div class="footer-copy">© 2025 GhostTalk. All rights reserved.</div>
+  </footer>
+
+</section>
+
+<!-- ══════════════════════════════
+     DASHBOARD SECTION
+══════════════════════════════ -->
+<section id="dashboard">
+  <div class="dash-wrap">
+
+    <!-- SIDEBAR -->
+    <div class="dash-sidebar">
+      <div class="dash-nav-section">
+        <div class="dash-nav-label">Overview</div>
+        <button class="dash-nav-item active" onclick="showPanel('overview',this)"><span class="nav-icon">📊</span> Overview</button>
+        <button class="dash-nav-item" onclick="showPanel('live',this)"><span class="nav-icon">🟢</span> Live <span class="dash-badge" id="live-count">0</span></button>
+      </div>
+      <div class="dash-nav-section">
+        <div class="dash-nav-label">Management</div>
+        <button class="dash-nav-item" onclick="showPanel('users',this)"><span class="nav-icon">👥</span> Users</button>
+        <button class="dash-nav-item" onclick="showPanel('complaints',this)"><span class="nav-icon">⛔</span> Complaints <span class="dash-badge" id="comp-count" style="background:#d63031">0</span></button>
+        <button class="dash-nav-item" onclick="showPanel('broadcast',this)"><span class="nav-icon">📢</span> Broadcast</button>
+      </div>
+      <div class="dash-nav-section">
+        <div class="dash-nav-label">Bot Control</div>
+        <button class="dash-nav-item" onclick="showPanel('bots',this)"><span class="nav-icon">🤖</span> Bots</button>
+        <button class="dash-nav-item" onclick="showPanel('settings',this)"><span class="nav-icon">⚙️</span> Settings</button>
+      </div>
+      <div class="dash-nav-section">
+        <div style="padding:12px; margin-top:8px;">
+          <button class="btn-outline" style="width:100%;justify-content:center;font-size:12px;padding:8px" onclick="showSection('home')">← Back to Site</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MAIN -->
+    <div class="dash-main">
+
+      <!-- ── OVERVIEW ── -->
+      <div class="dash-panel active" id="panel-overview">
+        <div class="dash-header">
+          <div>
+            <div class="dash-title">Overview</div>
+            <div class="dash-subtitle">Bot performance at a glance · <span class="live-dot"></span> Live data</div>
+          </div>
+          <button class="btn-primary" style="font-size:13px;padding:10px 18px" onclick="loadStats()">↻ Refresh</button>
+        </div>
+
+        <div class="metrics">
+          <div class="metric"><div class="metric-val" id="m-users">—</div><div class="metric-label">Total Users</div><div class="metric-change up">↑ Growing</div></div>
+          <div class="metric"><div class="metric-val" id="m-chats">—</div><div class="metric-label">Total Chats</div><div class="metric-change up">↑ All time</div></div>
+          <div class="metric"><div class="metric-val" id="m-active">—</div><div class="metric-label">Active Chats</div><div class="metric-change" id="m-active-note">Right now</div></div>
+          <div class="metric"><div class="metric-val" id="m-queue">—</div><div class="metric-label">In Queue</div><div class="metric-change">Searching</div></div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">Top Chatters <span>by total chats</span></div>
+            <table class="data-table" id="lb-table">
+              <thead><tr><th>#</th><th>User</th><th>Chats</th><th>Streak</th><th>Rating</th></tr></thead>
+              <tbody id="lb-body"><tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Loading...</td></tr></tbody>
+            </table>
+          </div>
+          <div class="card">
+            <div class="card-title">Activity <span>chats per day (demo)</span></div>
+            <div class="chart-bars" id="chart-bars">
+              <div class="bar" style="height:30%"></div><div class="bar" style="height:45%"></div>
+              <div class="bar" style="height:60%"></div><div class="bar" style="height:40%"></div>
+              <div class="bar" style="height:75%"></div><div class="bar" style="height:55%"></div>
+              <div class="bar today" style="height:85%"></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:10px;color:var(--muted);">
+              <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Today</span>
+            </div>
+            <div style="margin-top:20px;">
+              <div class="card-title">Quick actions</div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btn-send" onclick="showPanel('broadcast',document.querySelectorAll('.dash-nav-item')[4])">📢 Broadcast</button>
+                <button class="btn-send" style="background:var(--accent2)" onclick="showPanel('complaints',document.querySelectorAll('.dash-nav-item')[3])">⛔ Complaints</button>
+                <button class="btn-send" style="background:#636e72" onclick="showPanel('users',document.querySelectorAll('.dash-nav-item')[2])">👥 Users</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Recent Activity</div>
+          <div id="activity-feed">
+            <div class="activity-item"><div class="activity-icon" style="background:rgba(0,184,148,.1)">🟢</div><div><div class="activity-text">Bot is running normally</div><div class="activity-time">just now</div></div></div>
+            <div class="activity-item"><div class="activity-icon" style="background:rgba(108,92,231,.1)">👥</div><div><div class="activity-text">Stats loaded from server</div><div class="activity-time">on page load</div></div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── LIVE ── -->
+      <div class="dash-panel" id="panel-live">
+        <div class="dash-header"><div><div class="dash-title">Live</div><div class="dash-subtitle"><span class="live-dot"></span> Real-time bot activity</div></div><button class="btn-primary" style="font-size:13px;padding:10px 18px" onclick="loadStats()">↻ Refresh</button></div>
+        <div class="grid-2">
+          <div class="metric"><div class="metric-val" id="live-active">—</div><div class="metric-label">Active Chats</div></div>
+          <div class="metric"><div class="metric-val" id="live-search">—</div><div class="metric-label">Searching Now</div></div>
+        </div>
+        <div class="card"><div class="card-title">Active Chats</div><div id="live-chats-list" style="font-size:13px;color:var(--muted);padding:20px 0;text-align:center">Refresh to load live data</div></div>
+      </div>
+
+      <!-- ── USERS ── -->
+      <div class="dash-panel" id="panel-users">
+        <div class="dash-header"><div><div class="dash-title">Users</div><div class="dash-subtitle">Search and manage users</div></div></div>
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-title">Lookup User</div>
+          <div class="lookup-row">
+            <input class="lookup-input" id="ban-input" placeholder="Paste anon_id to ban/unban..." />
+            <button class="btn-search" onclick="banUser()">Ban User</button>
+            <button class="btn-search" style="background:var(--accent3)" onclick="unbanUser()">Unban</button>
+          </div>
+          <div id="ban-result" style="font-size:13px;color:var(--muted)"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Top Users <span>by chats</span></div>
+          <table class="data-table">
+            <thead><tr><th>ID</th><th>Chats</th><th>Messages</th><th>Streak</th><th>Rating</th><th>Status</th></tr></thead>
+            <tbody id="users-body"><tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">Click Refresh on Overview to load</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── COMPLAINTS ── -->
+      <div class="dash-panel" id="panel-complaints">
+        <div class="dash-header"><div><div class="dash-title">Complaints</div><div class="dash-subtitle">Review reported content</div></div><button class="btn-primary" style="font-size:13px;padding:10px 18px" onclick="loadComplaints()">↻ Load</button></div>
+        <div class="card">
+          <table class="data-table">
+            <thead><tr><th>#</th><th>Time</th><th>Reason</th><th>Severity</th><th>Excerpt</th><th>Action</th></tr></thead>
+            <tbody id="complaints-body"><tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">Click Load to fetch complaints</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── BROADCAST ── -->
+      <div class="dash-panel" id="panel-broadcast">
+        <div class="dash-header"><div><div class="dash-title">Broadcast</div><div class="dash-subtitle">Send a message to all users</div></div></div>
+        <div class="broadcast-box">
+          <div class="card-title">New Broadcast</div>
+          <textarea class="broadcast-textarea" id="broadcast-msg" placeholder="Type your message here... (supports Markdown: *bold* _italic_)" oninput="updateCount()"></textarea>
+          <div class="broadcast-footer">
+            <div class="broadcast-count" id="bc-count">0 / 500 characters</div>
+            <div style="display:flex;gap:10px">
+              <button class="btn-send" style="background:var(--surface);color:var(--ink);border:1px solid var(--border)" onclick="previewBroadcast()">Preview</button>
+              <button class="btn-send" onclick="sendBroadcast()">📢 Send to All</button>
+            </div>
+          </div>
+          <div id="broadcast-preview" style="display:none;margin-top:16px;padding:14px;background:var(--surface);border-radius:8px;font-size:13px;border:1px solid var(--border)"></div>
+        </div>
+        <div class="card" style="margin-top:16px">
+          <div class="card-title">Broadcast History</div>
+          <div id="broadcast-history" style="font-size:13px;color:var(--muted)">No broadcasts sent yet.</div>
+        </div>
+      </div>
+
+      <!-- ── BOTS ── -->
+      <div class="dash-panel" id="panel-bots">
+        <div class="dash-header"><div><div class="dash-title">Bot Control</div><div class="dash-subtitle">Manage all connected bots</div></div></div>
+        <div id="bots-list">
+          <div class="bot-card"><div class="bot-icon" style="background:rgba(108,92,231,.15)">👻</div><div class="bot-info"><div class="bot-name">GhostTalk Chat Bot</div><div class="bot-meta">@IamDinkybot · Anonymous 1-on-1 chat</div></div><div class="bot-actions"><span class="badge badge-green"><span class="badge-dot"></span>Running</span><button class="toggle on" onclick="toggleBot(this)"></button></div></div>
+          <div class="bot-card"><div class="bot-icon" style="background:rgba(0,206,201,.15)">🤖</div><div class="bot-info"><div class="bot-name">AI Fallback</div><div class="bot-meta">OpenAI GPT-3.5 · Engages users when no humans found</div></div><div class="bot-actions"><span class="badge badge-green" id="ai-status-badge"><span class="badge-dot"></span>Active</span><button class="toggle on" onclick="toggleBot(this)"></button></div></div>
+          <div class="bot-card"><div class="bot-icon" style="background:rgba(253,121,168,.15)">🎮</div><div class="bot-info"><div class="bot-name">Games Engine</div><div class="bot-meta">Trivia · Would You Rather · Truth or Dare · Word Chain</div></div><div class="bot-actions"><span class="badge badge-green"><span class="badge-dot"></span>Active</span><button class="toggle on" onclick="toggleBot(this)"></button></div></div>
+          <div class="bot-card" style="border-style:dashed;cursor:pointer"><div class="bot-icon" style="background:var(--surface)">➕</div><div class="bot-info"><div class="bot-name" style="color:var(--muted)">Add New Bot</div><div class="bot-meta">Connect another Telegram bot to this dashboard</div></div></div>
+        </div>
+        <div class="card" style="margin-top:16px">
+          <div class="card-title">Server Status</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:4px">
+            <div><div style="font-size:11px;color:var(--muted);margin-bottom:4px">Render Server</div><span class="badge badge-green"><span class="badge-dot"></span>Online</span><div class="progress-bar"><div class="progress-fill" style="width:32%;background:var(--accent3)"></div></div><div style="font-size:10px;color:var(--muted);margin-top:4px">CPU 32%</div></div>
+            <div><div style="font-size:11px;color:var(--muted);margin-bottom:4px">Vercel WebApp</div><span class="badge badge-green"><span class="badge-dot"></span>Online</span><div class="progress-bar"><div class="progress-fill" style="width:8%;background:var(--accent)"></div></div><div style="font-size:10px;color:var(--muted);margin-top:4px">Load 8%</div></div>
+            <div><div style="font-size:11px;color:var(--muted);margin-bottom:4px">Database</div><span class="badge badge-green"><span class="badge-dot"></span>Healthy</span><div class="progress-bar"><div class="progress-fill" style="width:15%;background:var(--accent2)"></div></div><div style="font-size:10px;color:var(--muted);margin-top:4px">SQLite · 15% full</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── SETTINGS ── -->
+      <div class="dash-panel" id="panel-settings">
+        <div class="dash-header"><div><div class="dash-title">Settings</div><div class="dash-subtitle">Configure your bot</div></div><button class="btn-primary" style="font-size:13px;padding:10px 18px" onclick="saveSettings()">Save Changes</button></div>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">Bot Identity</div>
+            <div class="settings-group"><div class="settings-label">Bot Username</div><div class="settings-hint">Your Telegram bot @username</div><input class="settings-input" value="IamDinkybot"/></div>
+            <div class="settings-group"><div class="settings-label">Render Server URL</div><div class="settings-hint">Your deployed backend URL</div><input class="settings-input" id="render-url" placeholder="https://your-app.onrender.com"/></div>
+            <div class="settings-group"><div class="settings-label">WebApp URL</div><div class="settings-hint">Your Vercel webapp URL</div><input class="settings-input" value="https://ghosttele.vercel.app"/></div>
+          </div>
+          <div class="card">
+            <div class="card-title">Feature Toggles</div>
+            <div class="settings-row"><div><div class="settings-row-label">AI Fallback</div><div class="settings-row-desc">Chat with AI when no humans found</div></div><button class="toggle on" onclick="toggleBot(this)"></button></div>
+            <div class="settings-row"><div><div class="settings-row-label">Screenshot Protection</div><div class="settings-row-desc">Block forwarding and screenshots</div></div><button class="toggle on" onclick="toggleBot(this)"></button></div>
+            <div class="settings-row"><div><div class="settings-row-label">Media Blocking</div><div class="settings-row-desc">Only allow text and stickers</div></div><button class="toggle on" onclick="toggleBot(this)"></button></div>
+            <div class="settings-row"><div><div class="settings-row-label">Auto Moderation</div><div class="settings-row-desc">AI content filtering</div></div><button class="toggle on" onclick="toggleBot(this)"></button></div>
+            <div class="settings-row"><div><div class="settings-row-label">Daily Bonus</div><div class="settings-row-desc">Allow users to claim daily bonus</div></div><button class="toggle on" onclick="toggleBot(this)"></button></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Match Timing</div>
+          <div class="grid-3">
+            <div class="settings-group"><div class="settings-label">Search Timeout</div><div class="settings-hint">Seconds before widening search</div><input class="settings-input" value="20" type="number"/></div>
+            <div class="settings-group"><div class="settings-label">Max Wait Time</div><div class="settings-hint">Seconds before giving up</div><input class="settings-input" value="60" type="number"/></div>
+            <div class="settings-group"><div class="settings-label">Idle Timeout (min)</div><div class="settings-hint">Minutes before auto-ending chat</div><input class="settings-input" value="15" type="number"/></div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /dash-main -->
+  </div><!-- /dash-wrap -->
+</section>
 
 <script>
-// Telegram WebApp init
-const tg = window.Telegram?.WebApp;
-const BOT_USERNAME = 'TheGhostTalkBot';
+// ── CONFIG ──
+const RENDER_URL = localStorage.getItem('render_url') || '';
+const FAQS = [
+  { q:"Is this really anonymous?", a:"Yes. We store only a random ID per session — no name, phone, or Telegram username is ever saved to our database." },
+  { q:"Can you give me my partner's account?", a:"No. Under no circumstances do we disclose user data. Even we can't link a conversation to a real person." },
+  { q:"What is GhostTalk Premium?", a:"Premium gives you priority matching, interest and mood filters, extended chat time, and access to the AI partner feature. Contact the admin to subscribe." },
+  { q:"Is the chat safe?", a:"Your personal data is fully protected. However, you cannot verify who you're talking to — stay safe and report anyone who makes you uncomfortable." },
+  { q:"What happens if someone violates the rules?", a:"Our auto-moderation detects threats, hate speech, and harmful content in real time. Violations result in immediate chat termination and a ban." },
+  { q:"Can I use this on desktop?", a:"Yes — GhostTalk runs inside Telegram which is available on all platforms: Android, iOS, Windows, Mac, and Web." },
+];
 
-// Update referral link with real user data if available.
-if (tg?.initDataUnsafe?.user) {
-  const userId = tg.initDataUnsafe.user.id;
-  document.getElementById('ref-link').textContent =
-    `t.me/${BOT_USERNAME}?start=ref_${userId}`;
-}
+// ── INIT ──
+document.addEventListener('DOMContentLoaded', () => {
+  buildFAQ();
+  loadStats();
+  setInterval(loadStats, 30000);
+  // Load saved render URL
+  const saved = localStorage.getItem('render_url');
+  if (saved) document.getElementById('render-url').value = saved;
+});
 
-if (tg) {
-  tg.ready();
-  tg.expand();
-  // Match Telegram theme
-  if (tg.colorScheme === 'light') document.documentElement.setAttribute('data-theme','light');
-}
-
-// Load saved profile from localStorage
-const saved = JSON.parse(localStorage.getItem('gt_profile') || '{}');
-if (saved.name) document.getElementById('f-name').value = saved.name;
-if (saved.age)  document.getElementById('f-age').value  = saved.age;
-if (saved.bio)  document.getElementById('f-bio').value  = saved.bio;
-if (saved.lang) document.getElementById('f-lang').value = saved.lang;
-if (saved.gender) {
-  document.querySelectorAll('.gender-btn').forEach(b => {
-    if (b.textContent.includes(saved.gender)) b.classList.add('on');
-  });
-}
-if (saved.mood) {
-  document.querySelectorAll('.mood').forEach(m => {
-    m.classList.toggle('on', m.textContent.includes(saved.mood));
-  });
-}
-if (saved.interests) {
-  const ints = saved.interests.split(',');
-  document.querySelectorAll('.tag').forEach(t => {
-    t.classList.toggle('on', ints.some(i => t.textContent.includes(i)));
-  });
-}
-if (saved.aiEnabled === false) {
-  document.getElementById('ai-toggle').className = 'ai-toggle off';
-  document.getElementById('ai-dot').className = 'ai-dot off';
+// ── THEME ──
+function toggleTheme() {
+  document.body.toggleAttribute('data-dark');
+  const btn = document.querySelector('.theme-toggle');
+  btn.textContent = document.body.hasAttribute('data-dark') ? '☀️' : '🌙';
 }
 
-// Fetch live data from your Render URL.
-(async () => {
+// ── SECTIONS ──
+function showSection(name, el) {
+  document.querySelectorAll('section').forEach(s => s.classList.remove('active'));
+  document.getElementById(name).classList.add('active');
+  document.querySelectorAll('.nav-links a').forEach(a => a.classList.remove('active'));
+  if (el) el.classList.add('active');
+  window.scrollTo(0,0);
+}
+
+function scrollTo(id) {
+  setTimeout(() => document.querySelector(id)?.scrollIntoView({ behavior:'smooth' }), 100);
+}
+
+// ── DASHBOARD PANELS ──
+function showPanel(name, el) {
+  document.querySelectorAll('.dash-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-' + name).classList.add('active');
+  document.querySelectorAll('.dash-nav-item').forEach(b => b.classList.remove('active'));
+  if (el) el.classList.add('active');
+}
+
+// ── LOAD STATS ──
+async function loadStats() {
+  const url = document.getElementById('render-url')?.value || localStorage.getItem('render_url') || '';
+  if (!url) {
+    updateMetrics({ active_chats:0, searching:0, leaderboard:[], stats:[] });
+    return;
+  }
   try {
-    const res = await fetch('https://ghosttalker-x76j.onrender.com/api/stats');
+    const res  = await fetch(url + '/api/stats');
     const data = await res.json();
-    // populate leaderboard with data.leaderboard
-  } catch (e) {
-    console.warn('Could not load live stats:', e);
+    updateMetrics(data);
+    addActivity('📊 Stats refreshed from server');
+  } catch(e) {
+    addActivity('⚠️ Could not reach server — check Render URL in Settings');
   }
-})();
-
-// Screen switching
-let activeTab = null;
-function goScreen(name, tabEl, bnEl) {
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  document.getElementById('screen-' + name).classList.add('active');
-  // top tabs
-  if (tabEl) { document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active')); tabEl.classList.add('active'); }
-  // bottom nav
-  if (bnEl) { document.querySelectorAll('.bnav-btn').forEach(b=>b.classList.remove('active')); bnEl.classList.add('active'); }
 }
 
-// Tag toggle (max 5)
-function toggleTag(el) {
-  const selected = document.querySelectorAll('#tags .tag.on');
-  if (el.classList.contains('on')) { el.classList.remove('on'); return; }
-  if (selected.length >= 5) { el.classList.add('max-warn'); setTimeout(()=>el.classList.remove('max-warn'),400); showToast('Max 5 interests!'); return; }
-  el.classList.add('on');
+function updateMetrics(data) {
+  const active  = data.active_chats || 0;
+  const search  = data.searching    || 0;
+  const stats   = data.stats        || [];
+  const lb      = data.leaderboard  || [];
+
+  const total_users  = stats.find(s=>s.key==='total_users')?.value  || 0;
+  const total_chats  = stats.find(s=>s.key==='total_chats')?.value  || 0;
+
+  // Overview metrics
+  setText('m-users',  total_users);
+  setText('m-chats',  total_chats);
+  setText('m-active', active);
+  setText('m-queue',  search);
+
+  // Live panel
+  setText('live-active', active);
+  setText('live-search', search);
+  setText('live-count',  active);
+
+  // Homepage stats
+  animateNum('stat-users',  total_users);
+  animateNum('stat-chats',  total_chats);
+  setText('stat-active', active);
+
+  // Leaderboard
+  const medals = ['🥇','🥈','🥉'];
+  const lbBody = document.getElementById('lb-body');
+  const usBody = document.getElementById('users-body');
+  if (lb.length === 0) {
+    lbBody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">No users yet</td></tr>`;
+    usBody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">No users yet</td></tr>`;
+  } else {
+    lbBody.innerHTML = lb.map((u,i) => `
+      <tr>
+        <td>${medals[i]||i+1}</td>
+        <td><code style="font-size:11px">${String(u.anon_id||'').slice(0,8)}...</code></td>
+        <td>${u.chat_count||0}</td>
+        <td>🔥 ${u.streak_days||0}d</td>
+        <td>⭐ ${u.avg_rating||0}</td>
+      </tr>`).join('');
+    usBody.innerHTML = lb.map(u => `
+      <tr>
+        <td><code style="font-size:11px">${String(u.anon_id||'').slice(0,8)}...</code></td>
+        <td>${u.chat_count||0}</td>
+        <td>${u.total_messages||0}</td>
+        <td>${u.streak_days||0}d</td>
+        <td>${u.avg_rating||0}★</td>
+        <td><span class="badge badge-green"><span class="badge-dot"></span>Active</span></td>
+      </tr>`).join('');
+  }
+
+  // Complaint count badge
+  if (data.open_complaints) setText('comp-count', data.open_complaints);
 }
 
-// Mood
-function setMood(el) {
-  document.querySelectorAll('.mood').forEach(m=>m.classList.remove('on'));
-  el.classList.add('on');
+function setText(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
 }
 
-// Gender
-function setGender(el, val) {
-  document.querySelectorAll('.gender-btn').forEach(b=>b.classList.remove('on'));
-  el.classList.add('on');
+function animateNum(id, target) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const suffix = el.querySelector('span') ? el.querySelector('span').outerHTML : '';
+  let cur = 0;
+  const step = Math.max(1, Math.floor(target / 40));
+  const t = setInterval(() => {
+    cur = Math.min(cur + step, target);
+    el.innerHTML = cur + suffix;
+    if (cur >= target) clearInterval(t);
+  }, 30);
 }
 
-// AI Toggle
-function toggleAI() {
-  const btn = document.getElementById('ai-toggle');
-  const dot = document.getElementById('ai-dot');
+function addActivity(text) {
+  const feed = document.getElementById('activity-feed');
+  if (!feed) return;
+  const item = document.createElement('div');
+  item.className = 'activity-item';
+  item.innerHTML = `<div class="activity-icon" style="background:var(--surface)">📡</div><div><div class="activity-text">${text}</div><div class="activity-time">${new Date().toLocaleTimeString()}</div></div>`;
+  feed.insertBefore(item, feed.firstChild);
+  if (feed.children.length > 8) feed.removeChild(feed.lastChild);
+}
+
+// ── COMPLAINTS ──
+async function loadComplaints() {
+  const url = document.getElementById('render-url')?.value || '';
+  if (!url) return alert('Set your Render URL in Settings first!');
+  try {
+    const res  = await fetch(url + '/api/complaints');
+    const data = await res.json();
+    const body = document.getElementById('complaints-body');
+    if (!data.length) {
+      body.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">No open complaints 🎉</td></tr>`;
+      return;
+    }
+    const sevBadge = s => s>=3?`<span class="badge badge-red">High</span>`:s>=2?`<span class="badge badge-yellow">Med</span>`:`<span class="badge" style="background:var(--surface)">Low</span>`;
+    body.innerHTML = data.map(r => `
+      <tr>
+        <td>#${r.id}</td>
+        <td style="font-size:11px;font-family:var(--font-mono)">${String(r.timestamp||'').slice(11,16)}</td>
+        <td>${r.reason||''}</td>
+        <td>${sevBadge(r.severity)}</td>
+        <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.excerpt||''}</td>
+        <td><button class="btn-send" style="padding:4px 10px;font-size:11px" onclick="resolveComplaint(${r.id})">Resolve</button></td>
+      </tr>`).join('');
+    setText('comp-count', data.length);
+  } catch(e) { alert('Could not load complaints. Check Render URL.'); }
+}
+
+async function resolveComplaint(id) {
+  addActivity(`✅ Complaint #${id} marked resolved`);
+  loadComplaints();
+}
+
+// ── BAN / UNBAN ──
+async function banUser() {
+  const id  = document.getElementById('ban-input').value.trim();
+  const url = document.getElementById('render-url')?.value || '';
+  if (!id)  return alert('Enter an anon_id');
+  if (!url) return alert('Set Render URL in Settings');
+  try {
+    await fetch(`${url}/api/ban`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({anon_id:id, reason:'Admin action'}) });
+    document.getElementById('ban-result').innerHTML = `<span class="badge badge-red">Banned: ${id.slice(0,12)}...</span>`;
+    addActivity(`🚫 Banned user ${id.slice(0,8)}...`);
+  } catch(e) { document.getElementById('ban-result').textContent = 'Failed — check Render URL'; }
+}
+
+async function unbanUser() {
+  const id  = document.getElementById('ban-input').value.trim();
+  const url = document.getElementById('render-url')?.value || '';
+  if (!id)  return alert('Enter an anon_id');
+  if (!url) return alert('Set Render URL in Settings');
+  try {
+    await fetch(`${url}/api/unban`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({anon_id:id}) });
+    document.getElementById('ban-result').innerHTML = `<span class="badge badge-green">Unbanned: ${id.slice(0,12)}...</span>`;
+    addActivity(`✅ Unbanned user ${id.slice(0,8)}...`);
+  } catch(e) { document.getElementById('ban-result').textContent = 'Failed — check Render URL'; }
+}
+
+// ── BROADCAST ──
+function updateCount() {
+  const txt = document.getElementById('broadcast-msg').value;
+  document.getElementById('bc-count').textContent = `${txt.length} / 500 characters`;
+}
+
+function previewBroadcast() {
+  const msg  = document.getElementById('broadcast-msg').value;
+  const prev = document.getElementById('broadcast-preview');
+  prev.style.display = 'block';
+  prev.innerHTML = `<strong>Preview:</strong><br/>${msg.replace(/\*(.+?)\*/g,'<strong>$1</strong>').replace(/_(.+?)_/g,'<em>$1</em>').replace(/\n/g,'<br/>')}`;
+}
+
+async function sendBroadcast() {
+  const msg = document.getElementById('broadcast-msg').value.trim();
+  const url = document.getElementById('render-url')?.value || '';
+  if (!msg) return alert('Write a message first!');
+  if (!url) return alert('Set Render URL in Settings');
+  if (!confirm(`Send this message to ALL users?`)) return;
+  try {
+    await fetch(`${url}/api/broadcast`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:msg}) });
+    document.getElementById('broadcast-history').innerHTML = `<div style="padding:10px;border-radius:8px;background:var(--surface);font-size:12px;margin-bottom:8px"><strong>${new Date().toLocaleString()}</strong><br/>${msg.slice(0,80)}...</div>` + document.getElementById('broadcast-history').innerHTML;
+    document.getElementById('broadcast-msg').value = '';
+    document.getElementById('broadcast-preview').style.display = 'none';
+    addActivity(`📢 Broadcast sent to all users`);
+  } catch(e) { alert('Broadcast failed — add /api/broadcast endpoint to your bot'); }
+}
+
+// ── BOT TOGGLE ──
+function toggleBot(btn) {
   const isOn = btn.classList.contains('on');
-  btn.className = 'ai-toggle ' + (isOn ? 'off' : 'on');
-  dot.className = 'ai-dot ' + (isOn ? 'off' : 'on');
-  showToast(isOn ? 'AI fallback disabled' : 'AI fallback enabled!');
-  const p = JSON.parse(localStorage.getItem('gt_profile')||'{}');
-  p.aiEnabled = !isOn;
-  localStorage.setItem('gt_profile', JSON.stringify(p));
-  if (tg) tg.sendData(JSON.stringify({ action: 'toggle_ai', value: !isOn }));
-}
-
-// Save profile
-function saveProfile() {
-  const name = document.getElementById('f-name').value.trim();
-  const age  = document.getElementById('f-age').value.trim();
-  const bio  = document.getElementById('f-bio').value.trim();
-  const lang = document.getElementById('f-lang').value;
-  const mood = document.querySelector('.mood.on')?.textContent.replace(/^[^\w]*/,'').trim() || '';
-  const gender = document.querySelector('.gender-btn.on')?.textContent.trim() || '';
-  const interests = [...document.querySelectorAll('#tags .tag.on')]
-    .map(t => t.textContent.replace(/^[^\w]*/,'').trim()).join(',');
-
-  const profile = { name, age, bio, lang, mood, gender, interests, aiEnabled: document.getElementById('ai-toggle').classList.contains('on') };
-  localStorage.setItem('gt_profile', JSON.stringify(profile));
-
-  // Send to bot via Telegram WebApp
-  if (tg) {
-    tg.sendData(JSON.stringify({ action: 'save_profile', ...profile }));
-  }
-  showToast('Profile saved!');
-}
-
-// Copy referral
-function copyRef() {
-  const link = document.getElementById('ref-link').textContent;
-  navigator.clipboard?.writeText(link).catch(()=>{});
-  showToast('Link copied!');
-}
-
-// Open chat (closes webapp, sends command)
-function openChat() {
-  if (tg) {
-    tg.sendData(JSON.stringify({ action: 'find_partner' }));
-    tg.close();
-  } else {
-    showToast('Open in Telegram to chat!');
+  btn.classList.toggle('on', !isOn);
+  btn.classList.toggle('off', isOn);
+  const badge = btn.previousElementSibling;
+  if (badge && badge.classList.contains('badge')) {
+    badge.className = isOn ? 'badge badge-red' : 'badge badge-green';
+    badge.innerHTML = isOn ? '<span class="badge-dot"></span>Stopped' : '<span class="badge-dot"></span>Running';
   }
 }
 
-// Launch game
-function launchGame(game) {
-  const soon = ['draw','quiz'];
-  if (soon.includes(game)) { showToast('Coming soon!'); return; }
-  if (tg) {
-    tg.sendData(JSON.stringify({ action: 'start_game', game }));
-    tg.close();
-  } else {
-    showToast('Open in Telegram!');
-  }
+// ── SAVE SETTINGS ──
+function saveSettings() {
+  const url = document.getElementById('render-url').value.trim();
+  if (url) { localStorage.setItem('render_url', url); }
+  alert('Settings saved! Refreshing stats...');
+  loadStats();
 }
 
-// Toast notification
-function showToast(msg) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 2000);
+// ── FAQ ──
+function buildFAQ() {
+  const container = document.getElementById('faq-list');
+  container.innerHTML = FAQS.map((f,i) => `
+    <div class="faq-item">
+      <button class="faq-q" onclick="toggleFAQ(${i},this)">
+        ${f.q}
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-a" id="faq-a-${i}">${f.a}</div>
+    </div>`).join('');
+}
+
+function toggleFAQ(i, btn) {
+  const ans = document.getElementById('faq-a-' + i);
+  const isOpen = ans.classList.contains('open');
+  document.querySelectorAll('.faq-a').forEach(a => a.classList.remove('open'));
+  document.querySelectorAll('.faq-q').forEach(b => b.classList.remove('open'));
+  if (!isOpen) { ans.classList.add('open'); btn.classList.add('open'); }
 }
 </script>
 </body>
