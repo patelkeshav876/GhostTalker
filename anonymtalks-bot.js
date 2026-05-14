@@ -10,6 +10,101 @@ const express = require('express');
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('👻 GhostTalk Bot is running!'));
+// ═══════════════════════════════════════════════════════════
+// ADD THESE API ROUTES TO anonymtalks-bot.js
+// Paste them AFTER your existing app.get('/health') line
+// and BEFORE app.listen(...)
+// ═══════════════════════════════════════════════════════════
+
+// Allow dashboard to fetch data
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+});
+
+// JSON body parser
+app.use(express.json());
+
+// GET /api/stats — overview stats + leaderboard
+app.get('/api/stats', (req, res) => {
+  if (!db) return res.json({ error: 'db not ready' });
+  try {
+    const stats = db.prepare('SELECT * FROM bot_stats').all();
+    const top   = db.prepare(
+      `SELECT anon_id, chat_count, streak_days, total_messages,
+       CASE WHEN rating_count > 0
+       THEN ROUND(CAST(rating_sum AS FLOAT)/rating_count,1)
+       ELSE 0 END as avg_rating
+       FROM users ORDER BY chat_count DESC LIMIT 10`
+    ).all();
+    const openComplaints = db.prepare(
+      'SELECT COUNT(*) as cnt FROM complaints WHERE resolved = 0'
+    ).get();
+    res.json({
+      active_chats:     activeChats.size,
+      searching:        Object.values(waitingPool).reduce((a,b) => a+b.length, 0),
+      stats,
+      leaderboard:      top,
+      open_complaints:  openComplaints?.cnt || 0
+    });
+  } catch(e) { res.json({ error: e.message }); }
+});
+
+// GET /api/complaints — open complaints
+app.get('/api/complaints', (req, res) => {
+  if (!db) return res.json([]);
+  try {
+    const rows = db.prepare(
+      'SELECT * FROM complaints WHERE resolved = 0 ORDER BY timestamp DESC LIMIT 20'
+    ).all();
+    res.json(rows);
+  } catch(e) { res.json([]); }
+});
+
+// POST /api/ban — ban a user
+app.post('/api/ban', (req, res) => {
+  const { anon_id, reason } = req.body || {};
+  if (!anon_id) return res.status(400).json({ error: 'anon_id required' });
+  db.prepare('UPDATE users SET banned = 1, ban_reason = ? WHERE anon_id = ?')
+    .run(reason || 'Admin action', anon_id);
+  res.json({ success: true });
+});
+
+// POST /api/unban — unban a user
+app.post('/api/unban', (req, res) => {
+  const { anon_id } = req.body || {};
+  if (!anon_id) return res.status(400).json({ error: 'anon_id required' });
+  db.prepare('UPDATE users SET banned = 0, ban_reason = NULL WHERE anon_id = ?')
+    .run(anon_id);
+  res.json({ success: true });
+});
+
+// POST /api/broadcast — send message to all users
+app.post('/api/broadcast', async (req, res) => {
+  const { message } = req.body || {};
+  if (!message) return res.status(400).json({ error: 'message required' });
+  try {
+    // Get all unique tg_ids from active sessions
+    // Since we don't persist tg_ids, we broadcast to all stored users via bot
+    // This sends a broadcast message logged in bot stats
+    db.prepare(
+      "INSERT OR IGNORE INTO bot_stats(key,value) VALUES('broadcasts',0)"
+    ).run();
+    db.prepare(
+      "UPDATE bot_stats SET value = value + 1 WHERE key = 'broadcasts'"
+    ).run();
+    // Note: To actually send to all users you need to store tg_ids in DB
+    // For now this confirms the broadcast was received
+    console.log('BROADCAST:', message);
+    res.json({ success: true, note: 'Broadcast logged. Add tg_id storage to send to all users.' });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.listen(PORT, '0.0.0.0', () => console.log('🌐 Web server on port ' + PORT));
 
@@ -412,28 +507,43 @@ async function endChatForUser(anon_id, reason = 'ended') {
     }
   }
 }
+
 // Add CORS so webapp can fetch it
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', 'https://theghosttalk.vercel.app/');
   next();
 });
 
-app.get('/api/stats', (req, res) => {
-  const stats = db.prepare('SELECT * FROM bot_stats').all();
-  const top   = db.prepare(
-    `SELECT anon_id, chat_count, streak_days,
-     CASE WHEN rating_count > 0 
-     THEN ROUND(CAST(rating_sum AS FLOAT)/rating_count,1) 
-     ELSE 0 END as avg_rating
-     FROM users ORDER BY chat_count DESC LIMIT 10`
-  ).all();
-  res.json({
-    active_chats: activeChats.size,
-    searching:    Object.values(waitingPool).reduce((a,b) => a+b.length, 0),
-    stats,
-    leaderboard: top
-  });
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', 'https://theghosttalk.vercel.app/');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  next();
 });
+
+app.get('/', (req, res) => res.send('👻 GhostTalk Bot is running!'));
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
+
+app.get('/api/stats', (req, res) => {
+  if (!db) return res.json({ error: 'db not ready' });
+  try {
+    const top = db.prepare(
+      `SELECT anon_id, chat_count, streak_days,
+       CASE WHEN rating_count > 0
+       THEN ROUND(CAST(rating_sum AS FLOAT)/rating_count,1)
+       ELSE 0 END as avg_rating
+       FROM users ORDER BY chat_count DESC LIMIT 10`
+    ).all();
+    res.json({
+      active_chats: activeChats.size,
+      searching: Object.values(waitingPool).reduce((a,b) => a+b.length, 0),
+      leaderboard: top
+    });
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
+app.listen(PORT, '0.0.0.0', () => console.log('🌐 Web server on port ' + PORT));
 
 // ─── SEARCH FLOW ──────────────────────────────────────────────────────────────
 async function startSearch(ctx, opts = {}) {
