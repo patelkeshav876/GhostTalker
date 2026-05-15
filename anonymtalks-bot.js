@@ -121,7 +121,9 @@ const BOT_USERNAME = process.env.BOT_USERNAME || 'GhostTalkBot';
 const WEBAPP_URL   = process.env.WEBAPP_URL   || '';
 const OPENAI_KEY   = process.env.OPENAI_API_KEY || '';
 
-if (!BOT_TOKEN) { console.error('Set BOT_TOKEN env var'); process.exit(1); }
+if (!BOT_TOKEN) { console.error('❌ BOT_TOKEN env var not set. Exiting.'); process.exit(1); }
+console.log('✓ BOT_TOKEN loaded');
+console.log('✓ ADMIN_IDS:', ADMIN_IDS.length > 0 ? ADMIN_IDS : 'none');
 
 // ─── DATABASE ─────────────────────────────────────────────────────────────────
 class Database {
@@ -542,8 +544,6 @@ app.get('/api/stats', (req, res) => {
     res.json({ error: e.message });
   }
 });
-
-app.listen(PORT, '0.0.0.0', () => console.log('🌐 Web server on port ' + PORT));
 
 // ─── SEARCH FLOW ──────────────────────────────────────────────────────────────
 async function startSearch(ctx, opts = {}) {
@@ -1403,8 +1403,14 @@ process.on('SIGINT', () => {
 
 // ─── LAUNCH ───────────────────────────────────────────────────────────────────
 (async () => {
-  await initDB();
-  await bot.launch();
-  console.log('✅ GhostTalk bot is running!');
-  console.log(`Admin IDs: ${ADMIN_IDS.join(', ') || 'none set'}`);
+  try {
+    await initDB();
+    console.log('✅ Database initialized');
+    await bot.launch();
+    console.log('✅ GhostTalk bot is running!');
+    console.log(`Admin IDs: ${ADMIN_IDS.join(', ') || 'none set'}`);
+  } catch (err) {
+    console.error('❌ Bot launch error:', err.message);
+    process.exit(1);
+  }
 })();
