@@ -174,6 +174,8 @@ async function initDB() {
   const mbCount = db.prepare('SELECT COUNT(*) as c FROM managed_bots').get()?.c || 0;
   if (mbCount === 0) {
     db.prepare('INSERT INTO managed_bots(name,username,description,features,category,link,icon,active) VALUES(?,?,?,?,?,?,?,1)')
+      .run('Ghost Music Bot', 'GhostMusic_Bot', 'Play high-quality music and songs directly in your Telegram Voice Chats (VC) 24/7.', 'Voice Chat Music,High Quality Audio,Queue System', 'Music', 'https://t.me/GhostMusic_Bot', '🎵');
+    db.prepare('INSERT INTO managed_bots(name,username,description,features,category,link,icon,active) VALUES(?,?,?,?,?,?,?,1)')
       .run('GhostTalk', 'TheGhostTalk_Bot', 'Anonymous 1:1 chat bot. Match with strangers worldwide instantly.', 'Anonymous,Fast Matching,Mini Games', 'Chat', 'https://t.me/TheGhostTalk_Bot', '👻');
   }
 }
@@ -273,7 +275,7 @@ let gameAdText = process.env.GAME_AD_TEXT || '🎮 Loading next question...';
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const MOODS = ['😊 Happy','😔 Sad','🤔 Philosophical','🔥 Flirty','😂 Funny','💪 Motivational','😴 Chill'];
 const INTEREST_TAGS = ['🎵 Music','🎮 Gaming','📚 Books','🏋️ Fitness','🎨 Art','💻 Tech','🍕 Food','✈️ Travel','💰 Crypto','🎬 Movies','🌿 Nature','🧠 Philosophy'];
-const LANGUAGES = ['Any','English','Hindi','Spanish','Arabic','Russian','French'];
+const LANGUAGES = ['🎲 Random / Any','English','Hindi','Indonesian','Iranian (Persian)','Spanish','Arabic','Russian','French'];
 
 // ─── KEYBOARDS ────────────────────────────────────────────────────────────────
 // Clean minimal main menu (matching modern anonymous bots)
@@ -1001,14 +1003,24 @@ async function showPremiumPage(ctx) {
 async function showOurBots(ctx) {
   let bots = db.prepare('SELECT * FROM managed_bots WHERE active=1 ORDER BY sort_order ASC, added_at DESC').all();
   if (!bots.length) {
-    bots = [{
-      name: 'GhostTalk',
-      username: 'TheGhostTalk_Bot',
-      description: 'Anonymous 1:1 chat bot with zero traces. Fast matchmaking, mini-games & streaks.',
-      category: 'Chat',
-      link: 'https://t.me/TheGhostTalk_Bot',
-      icon: '👻'
-    }];
+    bots = [
+      {
+        name: 'Ghost Music Bot',
+        username: 'GhostMusic_Bot',
+        description: 'Play high-quality music and songs directly in your Telegram Voice Chats (VC) 24/7.',
+        category: 'Music',
+        link: 'https://t.me/GhostMusic_Bot',
+        icon: '🎵'
+      },
+      {
+        name: 'GhostTalk',
+        username: 'TheGhostTalk_Bot',
+        description: 'Anonymous 1:1 chat bot with zero traces. Fast matchmaking, mini-games & streaks.',
+        category: 'Chat',
+        link: 'https://t.me/TheGhostTalk_Bot',
+        icon: '👻'
+      }
+    ];
   }
   const bycat = {};
   for (const b of bots) { if (!bycat[b.category]) bycat[b.category] = []; bycat[b.category].push(b); }
@@ -1371,10 +1383,11 @@ bot.action(/ob_g_(.+)/, async ctx => {
     {
       parse_mode: 'Markdown',
       ...Markup.inlineKeyboard([
-        [Markup.button.callback('English', 'ob_l_English'), Markup.button.callback('Hindi (हिंदी)', 'ob_l_Hindi')],
-        [Markup.button.callback('Spanish (Español)', 'ob_l_Spanish'), Markup.button.callback('Russian (Русский)', 'ob_l_Russian')],
-        [Markup.button.callback('French (Français)', 'ob_l_French'), Markup.button.callback('German (Deutsch)', 'ob_l_German')],
-        [Markup.button.callback('🌐 Other / Any', 'ob_l_Other'), Markup.button.callback('⏩ Skip', 'ob_l_skip')]
+        [Markup.button.callback('🎲 Random / Any', 'ob_l_Random'), Markup.button.callback('English', 'ob_l_English')],
+        [Markup.button.callback('Hindi (हिंदी)', 'ob_l_Hindi'), Markup.button.callback('Indonesian (Bahasa)', 'ob_l_Indonesian')],
+        [Markup.button.callback('Iranian (فارسی)', 'ob_l_Iranian'), Markup.button.callback('Spanish (Español)', 'ob_l_Spanish')],
+        [Markup.button.callback('Arabic (العربية)', 'ob_l_Arabic'), Markup.button.callback('Russian (Русский)', 'ob_l_Russian')],
+        [Markup.button.callback('French (Français)', 'ob_l_French'), Markup.button.callback('⏩ Skip', 'ob_l_skip')]
       ])
     }
   );
@@ -1712,9 +1725,20 @@ async function showMoodPicker(ctx) {
   await ctx.reply("🎭 *Set your mood:*\nChoose from below or type your custom mood!", { parse_mode:'Markdown', ...Markup.inlineKeyboard(rows) });
 }
 async function showLanguagePicker(ctx) {
-  const btns=LANGUAGES.map(l=>Markup.button.callback(l,`lang_${l.toLowerCase()}`)); const rows=[];
-  for (let i=0;i<btns.length;i+=2) rows.push(btns.slice(i,i+2));
-  await ctx.reply('🌐 *Preferred language:*', { parse_mode:'Markdown', ...Markup.inlineKeyboard(rows) });
+  const btns = [
+    Markup.button.callback('🎲 Random / Any', 'lang_any'),
+    Markup.button.callback('English', 'lang_english'),
+    Markup.button.callback('Hindi (हिंदी)', 'lang_hindi'),
+    Markup.button.callback('Indonesian (Bahasa)', 'lang_indonesian'),
+    Markup.button.callback('Iranian (فارسی)', 'lang_iranian'),
+    Markup.button.callback('Spanish (Español)', 'lang_spanish'),
+    Markup.button.callback('Arabic (العربية)', 'lang_arabic'),
+    Markup.button.callback('Russian (Русский)', 'lang_russian'),
+    Markup.button.callback('French (Français)', 'lang_french')
+  ];
+  const rows = [];
+  for (let i = 0; i < btns.length; i += 2) rows.push(btns.slice(i, i + 2));
+  await ctx.reply('🌐 *Preferred language:*\nSelect your preferred language, or choose 🎲 Random / Any to chat with anyone worldwide!', { parse_mode: 'Markdown', ...Markup.inlineKeyboard(rows) });
 }
 async function showLeaderboard(ctx) {
   if (!isAdmin(ctx)) {
@@ -1727,9 +1751,18 @@ async function showLeaderboard(ctx) {
   await ctx.reply(`📊 *Admin Leaderboard Preview*\n\n${lines}`, { parse_mode:'Markdown' });
 }
 async function showReferral(ctx) {
-  const s=ensureSession(ctx); const u=getUser(s.anon_id);
-  const link=`https://t.me/${BOT_USERNAME}?start=ref_${u.referral_code}`;
-  await ctx.reply(`🔗 *Refer & Earn*\n\nShare your link, earn bonuses!\n\nYour link:\n\`${link}\`\n\n👥 Referred: ${u.referral_count||0}\n🎁 Every 3 referrals = +1 VIP day`, { parse_mode:'Markdown' });
+  const s = ensureSession(ctx); const u = getUser(s.anon_id);
+  const link = `https://t.me/${BOT_USERNAME}?start=ref_${u.referral_code}`;
+  await ctx.reply(
+    `🤝 *Affiliate & Referral Program*\n\n` +
+    `Invite friends or your audience to GhostTalk using your personal affiliate link!\n\n` +
+    `🔗 *Your Affiliate Link:*\n\`${link}\`\n\n` +
+    `📊 *Your Stats:*\n` +
+    `├ 👥 Total Users Invited: *${u.referral_count || 0}*\n` +
+    `└ 🎁 Reward: *Every 3 invites = +1 Free VIP Day*\n\n` +
+    `Share this link on your Telegram channels, groups, Instagram, or WhatsApp to earn rewards automatically!`,
+    { parse_mode: 'Markdown' }
+  );
 }
 
 // ─── GRACEFUL SHUTDOWN ────────────────────────────────────────────────────────
