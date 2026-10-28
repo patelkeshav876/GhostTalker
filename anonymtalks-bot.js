@@ -245,11 +245,17 @@ const getActiveToday = () => {
 };
 
 // ─── IN-MEMORY STATE ──────────────────────────────────────────────────────────
-const waitingPool = { random: [], female: [], male: [], other: [] };
+const waitingPool = { random: [], flirt: [], female: [], male: [], other: [] };
 const activeChats = new Map();
 const tgToAnon    = {};
 const spamTracker = {};
 const gameStates  = new Map();
+
+// Helper to reliably check if a user is currently engaged in an active chat
+function isUserInChat(tg_id) {
+  const m = tgToAnon[tg_id];
+  return Boolean(m && m.chatId && activeChats.has(m.chatId));
+}
 
 // ─── BOT SETUP ────────────────────────────────────────────────────────────────
 const bot = new Telegraf(BOT_TOKEN);
@@ -262,12 +268,11 @@ const LANGUAGES = ['Any','English','Hindi','Spanish','Arabic','Russian','French'
 
 // ─── KEYBOARDS ────────────────────────────────────────────────────────────────
 const lobbyKb  = () => Markup.keyboard([
-  ['🚀 Random Chat', '😍 Flirt Chat'],
+  ['🚀 Random Chat', '🔥 Flirt Chat'],
   ['🔍 Match by Interest', '🎭 Match by Mood'],
   ['👤 Profile', '🎁 Daily Bonus'],
-  ['📊 Leaderboard', '🎮 Mini Games'],
-  ['💎 Go Premium', '🔗 Refer & Earn'],
-  ['🤖 Our Bots'],
+  ['🎮 Mini Games', '🔗 Refer & Earn'],
+  ['💎 Go Premium', '🤖 Our Bots'],
 ]).resize();
 
 const searchKb = () => Markup.keyboard([['❌ Cancel Search']]).resize();
@@ -288,7 +293,7 @@ function ensureSession(ctx) {
       anon_id: makeAnonId(), inChat: false, chatId: null,
       searchingSince: null, awaitingComplaint: null,
       awaitingBotField: null, pendingBot: {},
-      premium: false, vip_tier: 0, queueJump: 0,
+      premium: true, vip_tier: 2, queueJump: 0,
     };
     ensureUserRow(ctx.session.anon.anon_id, ctx.from?.id);
   }
@@ -326,8 +331,10 @@ function isSpamming(tg_id) {
 
 // ─── POOL HELPERS ─────────────────────────────────────────────────────────────
 function removeFromPools(anon_id) {
-  ['random','male','female','other'].forEach(k => {
-    waitingPool[k] = waitingPool[k].filter(u => u.anon_id !== anon_id);
+  ['random','flirt','male','female','other'].forEach(k => {
+    if (waitingPool[k]) {
+      waitingPool[k] = waitingPool[k].filter(u => u.anon_id !== anon_id);
+    }
   });
 }
 function interestScore(a, b) {
@@ -335,23 +342,45 @@ function interestScore(a, b) {
   const sA = new Set(a.split(','));
   let n = 0; b.split(',').forEach(x => { if (sA.has(x)) n++; }); return n;
 }
-function tryMatch(item, genderPref) {
+function tryMatch(item, opts = {}) {
+  const isFlirt = opts.mode === 'flirt' || item.mode === 'flirt';
+  if (isFlirt) {
+    const pool = waitingPool.flirt;
+    let best = -1, bestIdx = -1;
+    for (let i = 0; i < pool.length; i++) {
+      const c = pool[i];
+      if (c.anon_id === item.anon_id) continue;
+      let score = 1;
+      if (item.mood && c.mood === item.mood) score += 3;
+      score += interestScore(item.interests, c.interests) * 2;
+      if (score > best) { best = score; bestIdx = i; }
+    }
+    if (bestIdx >= 0) return pool.splice(bestIdx, 1)[0];
+    return null;
+  }
+
+  // Random / Standard matching
   const pools = [];
-  if (genderPref) pools.push(waitingPool[genderPref]);
-  pools.push(waitingPool.random, waitingPool.male, waitingPool.female, waitingPool.other);
+  if (opts.genderPref && waitingPool[opts.genderPref]) {
+    pools.push(waitingPool[opts.genderPref]);
+  }
+  pools.push(waitingPool.random);
+
   let best = -1, bestPool = null, bestIdx = -1;
   for (const pool of pools) {
     if (!pool) continue;
     for (let i = 0; i < pool.length; i++) {
-      const c = pool[i]; if (c.anon_id === item.anon_id) continue;
-      let score = 0;
+      const c = pool[i];
+      if (c.anon_id === item.anon_id) continue;
+      if (opts.genderPref && c.gender && c.gender !== opts.genderPref) continue;
+      let score = 1;
       if (item.mood && c.mood === item.mood) score += 3;
       score += interestScore(item.interests, c.interests) * 2;
-      score += (c.premium || 0);
       if (score > best) { best = score; bestPool = pool; bestIdx = i; }
     }
+    if (bestIdx >= 0) break;
   }
-  if (bestIdx >= 0) return bestPool.splice(bestIdx, 1)[0];
+  if (bestIdx >= 0 && bestPool) return bestPool.splice(bestIdx, 1)[0];
   return null;
 }
 
@@ -367,16 +396,15 @@ async function connectPair(a, b) {
   const sA = updateStreak(a.anon_id), sB = updateStreak(b.anon_id);
   try { await bot.telegram.sendMessage(a.tg_id, buildFoundMsg(uB, sA), { parse_mode:'Markdown', protect_content:true, ...chatKb() }); } catch(e) {}
   try { await bot.telegram.sendMessage(b.tg_id, buildFoundMsg(uA, sB), { parse_mode:'Markdown', protect_content:true, ...chatKb() }); } catch(e) {}
-  const chat = activeChats.get(chatId);
-  if (chat) chat.idleTimer = setTimeout(() => endChat(chatId, 'idle_timeout'), 15 * 60 * 1000);
 }
 
 function buildFoundMsg(p, streak) {
   const r    = p ? getRating(p.anon_id) : 0;
-  const stars = r > 0 ? '⭐'.repeat(Math.round(r)) : 'unrated';
+  const stars = r > 0 ? '⭐'.repeat(Math.min(5, Math.round(r))) : 'unrated';
   return [
     '🦋 *Partner found! Say hi 👋*', '',
     '*─── Partner Info ───*',
+    p?.gender    ? `👤 *Gender:* ${p.gender}` : '',
     p?.interests ? `🏷 *Interests:* ${p.interests}` : '🏷 *Interests:* not set',
     p?.mood      ? `🎭 *Mood:* ${p.mood}` : '',
     `🏆 *Rating:* ${r} ${stars}`,
@@ -387,19 +415,35 @@ function buildFoundMsg(p, streak) {
 }
 
 // ─── END CHAT ─────────────────────────────────────────────────────────────────
-async function endChat(chatId, reason = 'ended') {
+async function endChat(chatId, reason = 'ended', initiatorTg = null) {
   const chat = activeChats.get(chatId); if (!chat) return;
   const secs = Math.floor((Date.now() - chat.startedAt) / 1000);
   const total = (chat.a_msgs || 0) + (chat.b_msgs || 0);
   if (chat.idleTimer) clearTimeout(chat.idleTimer);
   activeChats.delete(chatId);
-  const txt = [`💬 *Chat ended!*`, `⏱ ${Math.floor(secs/60)}m ${secs%60}s · 📨 ${total} messages`,
-    reason === 'idle_timeout' ? '😴 Ended due to inactivity.' : '', '', 'What would you like to do?']
-    .filter(Boolean).join('\n');
+
+  const durationStr = `⏱ ${Math.floor(secs/60)}m ${secs%60}s · 📨 ${total} messages`;
+
   for (const id of [chat.a_tg, chat.b_tg]) {
-    try { await bot.telegram.sendMessage(id, txt, { parse_mode:'Markdown', ...endChatKb() }); } catch(e) {}
     delete tgToAnon[id];
+    let note = '';
+    if (initiatorTg && id !== initiatorTg) {
+      if (reason === 'user_next') note = '⏭ *Your partner skipped to the next chat.*';
+      else if (reason === 'user_stop') note = '🛑 *Your partner left the chat.*';
+      else if (reason === 'partner_left') note = '⚠️ *Your partner disconnected or left the bot.*';
+    } else if (id === initiatorTg) {
+      if (reason === 'user_next') note = '⏭ *You skipped to the next chat.*';
+      else if (reason === 'user_stop') note = '🛑 *You ended the chat.*';
+    } else if (reason === 'partner_left') {
+      note = '⚠️ *Your partner disconnected or left the bot.*';
+    }
+
+    const txt = [`💬 *Chat ended!*`, durationStr, note, '', 'What would you like to do next?']
+      .filter(Boolean).join('\n');
+
+    try { await bot.telegram.sendMessage(id, txt, { parse_mode:'Markdown', ...endChatKb() }); } catch(e) {}
   }
+
   logChat(chatId, chat.a_anon, chat.b_anon, new Date(chat.startedAt).toISOString(), new Date().toISOString(), total, reason);
   db.prepare('UPDATE users SET total_messages=total_messages+? WHERE anon_id=?').run(chat.a_msgs, chat.a_anon);
   db.prepare('UPDATE users SET total_messages=total_messages+? WHERE anon_id=?').run(chat.b_msgs, chat.b_anon);
@@ -407,44 +451,102 @@ async function endChat(chatId, reason = 'ended') {
   gameStates.delete(chatId);
 }
 
-async function endChatForUser(anon_id, reason = 'ended') {
+async function endChatForUser(anon_id, reason = 'ended', initiatorTg = null) {
   for (const [id, c] of activeChats.entries())
-    if (c.a_anon === anon_id || c.b_anon === anon_id) { await endChat(id, reason); return; }
+    if (c.a_anon === anon_id || c.b_anon === anon_id) { await endChat(id, reason, initiatorTg); return; }
 }
 
 // ─── SEARCH ───────────────────────────────────────────────────────────────────
 async function startSearch(ctx, opts = {}) {
   const s = ensureSession(ctx);
-  if (s.inChat) return ctx.reply('⚠️ End your current chat first (/stop).');
-  checkPremiumExpiry(s.anon_id);
+  if (isUserInChat(ctx.from.id)) {
+    return ctx.reply('⚠️ You are already in a chat! Tap ⏭ Next Chat or type /stop to exit.');
+  }
+  s.inChat = false;
+
   const u = getUser(s.anon_id);
   if (u.banned) return ctx.reply(`🚫 You are banned. Reason: ${u.ban_reason || 'rule violation'}`);
+
+  // Quick onboarding if gender/profile not configured
+  if (!u.gender) {
+    return startOnboarding(ctx, s.anon_id);
+  }
+
+  if (s.searchingSince) {
+    return ctx.reply('🔍 Already searching for a partner! Tap ❌ Cancel Search to stop.', searchKb());
+  }
+
   s.searchingSince = Date.now();
   removeFromPools(s.anon_id);
-  const item = { anon_id:s.anon_id, tg_id:ctx.from.id, gender:u.gender,
-    premium:(s.queueJump>0)?2:(u.premium||0), joinedAt:Date.now(),
-    mood:u.mood, interests:u.interests, language:u.language||'any' };
-  if (s.queueJump > 0) s.queueJump--;
+
+  const mode = opts.mode || 'random';
+  const item = {
+    anon_id: s.anon_id,
+    tg_id: ctx.from.id,
+    gender: u.gender,
+    mode: mode,
+    premium: 2, // Free launch: everyone gets high priority
+    joinedAt: Date.now(),
+    mood: u.mood,
+    interests: u.interests,
+    language: u.language || 'any'
+  };
+
   const gp = opts.genderPref || null;
-  if (gp) waitingPool[gp].push(item); else waitingPool.random.push(item);
-  await ctx.reply('🔍 Searching for a partner...', searchKb());
+  if (mode === 'flirt') {
+    waitingPool.flirt.push(item);
+  } else if (gp && waitingPool[gp]) {
+    waitingPool[gp].push(item);
+  } else {
+    waitingPool.random.push(item);
+  }
+
+  await ctx.reply(mode === 'flirt' ? '🔥 Searching for a flirt chat partner...' : '🔍 Searching for a partner...', searchKb());
+
   let elapsed = 0, wide = false;
   const poll = setInterval(async () => {
     elapsed += 1000;
-    if (!s.searchingSince || tgToAnon[ctx.from.id]?.chatId) { clearInterval(poll); return; }
-    const match = tryMatch(item, gp);
-    if (match) {
-      clearInterval(poll); s.searchingSince = null;
-      removeFromPools(s.anon_id); s.inChat = true;
-      await connectPair(item, match); return;
+    if (!s.searchingSince || isUserInChat(ctx.from.id)) {
+      clearInterval(poll);
+      return;
     }
-    if (elapsed === 20000 && !wide && s.searchingSince) { wide = true; await ctx.reply('⏳ Still searching — widening filters...').catch(() => {}); }
+    const match = tryMatch(item, { genderPref: gp, mode: mode });
+    if (match) {
+      clearInterval(poll);
+      s.searchingSince = null;
+      removeFromPools(s.anon_id);
+      removeFromPools(match.anon_id);
+      await connectPair(item, match);
+      return;
+    }
+    if (elapsed === 20000 && !wide && s.searchingSince) {
+      wide = true;
+      await ctx.reply('⏳ Still searching — widening filters...').catch(() => {});
+    }
     if (elapsed >= 60000) {
-      clearInterval(poll); removeFromPools(s.anon_id); s.searchingSince = null;
-      await ctx.reply('🌱 *Nobody searching right now!*\n\nTry again in a few minutes.\n🔗 Invite friends: /refer',
+      clearInterval(poll);
+      removeFromPools(s.anon_id);
+      s.searchingSince = null;
+      await ctx.reply('🌱 *Nobody searching right now!*\n\nTry again in a few moments.\n🔗 Invite friends: /refer',
         { parse_mode:'Markdown', ...lobbyKb() }).catch(() => {});
     }
   }, 1000);
+}
+
+// ─── ONBOARDING WIZARD ────────────────────────────────────────────────────────
+async function startOnboarding(ctx, anon_id) {
+  await ctx.reply(
+    `👻 *Welcome to GhostTalk!*\n\n` +
+    `Before we start matching you with awesome strangers, let's set up your anonymous profile in 3 quick steps:\n\n` +
+    `*Step 1 of 3: Select your gender*`,
+    {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('👨 Male', 'ob_g_male'), Markup.button.callback('👩 Female', 'ob_g_female')],
+        [Markup.button.callback('🌈 Other', 'ob_g_other'), Markup.button.callback('🤐 Skip', 'ob_g_skip')]
+      ])
+    }
+  );
 }
 
 // ─── MINI GAMES ───────────────────────────────────────────────────────────────
@@ -725,71 +827,22 @@ bot.action(/adm_delbot_(\d+)/, async ctx => {
 // ═══════════════════════════════════════════════════════════════════════════════
 //  PREMIUM — TELEGRAM STARS
 // ═══════════════════════════════════════════════════════════════════════════════
+//  PREMIUM & LAUNCH PROMOTION (Payments temporarily disabled)
+// ═══════════════════════════════════════════════════════════════════════════════
 async function showPremiumPage(ctx) {
-  const s = ensureSession(ctx);
-  checkPremiumExpiry(s.anon_id);
-  const u   = getUser(s.anon_id);
-  const tier = u.vip_tier || 0;
-  const statusLine = tier > 0
-    ? `✅ *Current plan:* ${['','⭐ VIP','👑 Premium'][tier]} · expires ${(u.premium_expires||'').slice(0,10)}\n`
-    : `🆓 *Current plan:* Free\n`;
-
   await ctx.reply(
-    `💎 *AnonymTalks Premium*\n\n${statusLine}\n` +
-    `*⭐ VIP — 50 Telegram Stars / month*\n` +
-    `├ ⚡ Priority queue matching\n├ 🏷 Interest-based matching\n├ 🎭 Mood-based matching\n└ 🎫 3 queue jumps/day\n\n` +
-    `*👑 Premium — 100 Telegram Stars / month*\n` +
-    `├ Everything in VIP\n├ 🌐 Language filter\n├ 👁 See partner mood before connecting\n└ ⏰ 30-min idle timeout\n\n` +
-    `💡 *Telegram Stars* are purchased inside Telegram.\nGo to: Settings → My Stars → Get Stars.`,
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('⭐ Get VIP — 50 Stars', 'buy_vip'), Markup.button.callback('👑 Get Premium — 100 Stars', 'buy_premium')],
-        tier > 0 ? [Markup.button.callback('❌ Cancel Subscription', 'cancel_premium')] : [Markup.button.callback('ℹ️ What are Stars?', 'stars_info')],
-      ])
-    }
+    `🎉 *Launch Celebration — All Features are FREE!*\n\n` +
+    `For a limited time during our global launch, all Premium & VIP perks are *100% FREE* for all users!\n\n` +
+    `✨ *Unlocked Perks:*\n` +
+    `• ⚡ Priority queue matchmaking\n` +
+    `• 🔍 Match by Interest\n` +
+    `• 🎭 Match by Mood\n` +
+    `• 🔥 Dedicated Flirt Chat\n` +
+    `• ♾️ Unlimited chat duration (stay as long as you want!)\n\n` +
+    `_No payments or Stars needed. Have fun chatting!_ 🚀`,
+    { parse_mode: 'Markdown' }
   );
 }
-
-async function sendInvoice(ctx, plan) {
-  const s    = ensureSession(ctx);
-  const pd   = PREMIUM_PLANS[plan]; if (!pd) return;
-  const payload = `${plan}_${s.anon_id}_${Date.now()}`;
-  db.prepare('INSERT INTO payments(tg_id,anon_id,plan,stars,payload,status) VALUES(?,?,?,?,?,?)').run(ctx.from.id, s.anon_id, plan, pd.stars, payload, 'pending');
-  try {
-    await ctx.replyWithInvoice({
-      title:         `${pd.emoji} ${pd.label} — AnonymTalks`,
-      description:   pd.perks.join('\n') + `\n\nValid for ${pd.days} days.`,
-      payload,
-      currency:      'XTR',
-      prices:        [{ label: pd.label, amount: pd.stars }],
-      provider_token:'',
-    });
-  } catch(e) {
-    await ctx.reply(`⚠️ Could not create invoice: ${e.message}\n\nMake sure bot payments are enabled via @BotFather.`);
-  }
-}
-
-bot.action('buy_vip',     async ctx => { await ctx.answerCbQuery(); await sendInvoice(ctx, 'vip'); });
-bot.action('buy_premium', async ctx => { await ctx.answerCbQuery(); await sendInvoice(ctx, 'premium'); });
-bot.action('cancel_premium', async ctx => {
-  await ctx.answerCbQuery();
-  const s = ensureSession(ctx);
-  db.prepare('UPDATE users SET vip_tier=0,premium=0,premium_expires=NULL WHERE anon_id=?').run(s.anon_id);
-  s.vip_tier = 0;
-  await ctx.reply('❌ *Subscription cancelled.* You are now on the Free plan.', { parse_mode:'Markdown' });
-});
-bot.action('stars_info', async ctx => {
-  await ctx.answerCbQuery();
-  await ctx.reply(
-    `⭐ *Telegram Stars*\n\n` +
-    `Stars are Telegram's native currency — safe, instant, no third-party needed.\n\n` +
-    `*How to get Stars:*\n1. Open Telegram\n2. Settings → My Stars\n3. Tap "Get Stars"\n4. Purchase via App Store / Google Play\n\n` +
-    `*Pricing (approx):*\n• 50 Stars ≈ $1 / ₹85\n• 100 Stars ≈ $2 / ₹170`,
-    { parse_mode:'Markdown' }
-  );
-});
-bot.on('pre_checkout_query', async ctx => { try { await ctx.answerPreCheckoutQuery(true); } catch(e) {} });
 
 // ─── OUR BOTS (public view) ────────────────────────────────────────────────────
 async function showOurBots(ctx) {
@@ -814,6 +867,10 @@ async function showOurBots(ctx) {
 bot.start(async ctx => {
   const s = ensureSession(ctx);
   ensureUserRow(s.anon_id, ctx.from.id);
+  s.inChat = false;
+  s.searchingSince = null;
+  removeFromPools(s.anon_id);
+
   const payload = ctx.startPayload;
   if (payload?.startsWith('ref_')) {
     const code = payload.replace('ref_','');
@@ -824,18 +881,26 @@ bot.start(async ctx => {
         db.prepare('UPDATE users SET referred_by=? WHERE anon_id=?').run(ref.owner_anon, s.anon_id);
         db.prepare('UPDATE referrals SET used_count=used_count+1 WHERE code=?').run(code);
         db.prepare('UPDATE users SET referral_count=referral_count+1 WHERE anon_id=?').run(ref.owner_anon);
-        await ctx.reply('🎉 You joined via a referral link! Your friend earns a bonus.');
+        await ctx.reply('🎉 You joined via a referral link! Your friend earns bonus points.');
       }
     }
   }
+
+  const u = getUser(s.anon_id);
+  if (!u.gender) {
+    return startOnboarding(ctx, s.anon_id);
+  }
+
   await ctx.reply(
-    `👻 *Welcome to AnonymTalks!*\n\n` +
+    `👻 *Welcome to GhostTalk!*\n\n` +
     `Chat anonymously with people around the world.\n` +
     `Your identity stays completely private — no names, no numbers.\n\n` +
     `*Get started:*\n` +
     `• 🚀 *Random Chat* — find a partner instantly\n` +
+    `• 🔥 *Flirt Chat* — connect with flirty vibes\n` +
     `• 🔍 *Match by Interest* — find someone like you\n` +
-    `• 💎 *Go Premium* — unlock priority & more\n\n` +
+    `• 🎭 *Match by Mood* — match by mood & vibe\n` +
+    `• 💎 *Go Premium* — 100% free during our launch!\n\n` +
     `_/rules for community guidelines_`,
     { parse_mode:'Markdown', ...lobbyKb() }
   );
@@ -843,19 +908,33 @@ bot.start(async ctx => {
 
 bot.command('stop', async ctx => {
   const s = ensureSession(ctx);
-  if (s.searchingSince) { removeFromPools(s.anon_id); s.searchingSince = null; return ctx.reply('🛑 Search cancelled.', lobbyKb()); }
-  if (!tgToAnon[ctx.from.id]?.chatId) return ctx.reply("🤷 You're not in a chat.", lobbyKb());
-  await endChatForUser(s.anon_id, 'user_stop'); s.inChat = false;
-  await ctx.reply('👋 Chat ended.', lobbyKb());
+  s.inChat = false;
+  if (s.searchingSince) {
+    removeFromPools(s.anon_id);
+    s.searchingSince = null;
+    return ctx.reply('🛑 Search cancelled.', lobbyKb());
+  }
+  if (isUserInChat(ctx.from.id)) {
+    await endChatForUser(s.anon_id, 'user_stop', ctx.from.id);
+  } else {
+    await ctx.reply("🏠 You're in the lobby.", lobbyKb());
+  }
 });
+
 bot.command('next', async ctx => {
   const s = ensureSession(ctx);
-  if (tgToAnon[ctx.from.id]?.chatId) { await endChatForUser(s.anon_id, 'user_next'); s.inChat = false; }
+  if (isUserInChat(ctx.from.id)) {
+    await endChatForUser(s.anon_id, 'user_next', ctx.from.id);
+  }
+  s.inChat = false;
+  s.searchingSince = null;
+  removeFromPools(s.anon_id);
   await startSearch(ctx, { mode:'random' });
 });
+
 bot.command('rules', async ctx => {
   await ctx.reply(
-    `📜 *AnonymTalks Community Rules*\n\n` +
+    `📜 *GhostTalk Community Rules*\n\n` +
     `1️⃣ No sexual content involving minors — *instant permanent ban*\n` +
     `2️⃣ No threats or violence\n3️⃣ No doxxing (sharing personal info)\n` +
     `4️⃣ No spam or flooding\n5️⃣ No hate speech\n\n` +
@@ -863,33 +942,63 @@ bot.command('rules', async ctx => {
     { parse_mode:'Markdown' }
   );
 });
+
 bot.command('profile', async ctx => {
-  const s = ensureSession(ctx); checkPremiumExpiry(s.anon_id);
-  const u = getUser(s.anon_id); const r = getRating(s.anon_id);
+  const s = ensureSession(ctx);
+  const u = getUser(s.anon_id);
+  const r = getRating(s.anon_id);
   await ctx.reply([
     `👤 *Your Profile*`, '',
     `🆔 ID: \`${s.anon_id.slice(0,8)}...\``,
-    `🏆 Rating: ${r} ${r>0?'⭐'.repeat(Math.round(r)):'unrated'}`,
+    `🏆 Rating: ${r} ${r>0?'⭐'.repeat(Math.min(5, Math.round(r))):'unrated'}`,
+    `👤 Gender: ${u.gender||'not set'}`,
     `💬 Chats: ${u.chat_count||0}`,
     `📨 Messages: ${u.total_messages||0}`,
     `🔥 Streak: ${u.streak_days||0} day(s)`,
     `🏷 Interests: ${u.interests||'not set'}`,
     `🎭 Mood: ${u.mood||'not set'}`,
     `🌐 Language: ${u.language||'any'}`,
-    `💎 Tier: ${['🆓 Free','⭐ VIP','👑 Premium'][u.vip_tier||0]}`,
-    u.premium_expires ? `⏳ Expires: ${u.premium_expires.slice(0,10)}` : '',
+    `💎 Tier: ⭐ VIP (Free Launch Pass)`,
     `👥 Referrals: ${u.referral_count||0}`,
   ].filter(Boolean).join('\n'), { parse_mode:'Markdown' });
 });
+
 bot.command('bonus', async ctx => {
   const s = ensureSession(ctx);
   const today = new Date().toISOString().slice(0,10);
   const u = getUser(s.anon_id);
-  if (u.last_bonus_date === today) return ctx.reply('⏰ Daily bonus already claimed! Come back tomorrow. 🌅');
-  db.prepare('UPDATE users SET last_bonus_date=? WHERE anon_id=?').run(today, s.anon_id);
-  s.queueJump = (s.queueJump||0) + 1;
-  await ctx.reply(`🎁 *Daily Bonus Claimed!*\n\n✅ +1 Queue Jump Token added.\n🔥 Keep chatting daily!`, { parse_mode:'Markdown' });
+  if (u.last_bonus_date === today) {
+    return ctx.reply('⏰ Daily bonus already claimed today! Come back tomorrow. 🌅');
+  }
+
+  // Top 3 chatters by chat count & rating
+  const top3 = db.prepare(`SELECT anon_id FROM users ORDER BY chat_count DESC, rating_sum DESC LIMIT 3`).all();
+  const isTop3 = top3.some(t => t.anon_id === s.anon_id);
+
+  if (isTop3) {
+    db.prepare('UPDATE users SET last_bonus_date=?, rating_sum=rating_sum+5, rating_count=rating_count+1 WHERE anon_id=?').run(today, s.anon_id);
+    s.queueJump = (s.queueJump||0) + 3;
+    await ctx.reply(
+      `🏆 *Top 3 Exclusive Daily Bonus Claimed!*\n\n` +
+      `⭐ You received *+5 Karma/Rating Points*!\n` +
+      `⚡ +3 Priority Queue Jumps added!\n\n` +
+      `Thank you for being one of our top chatters! Keep it up! 🔥`,
+      { parse_mode:'Markdown' }
+    );
+  } else {
+    await ctx.reply(
+      `🔒 *Top 3 Exclusive Bonus*\n\n` +
+      `The Daily 5-Point Bonus is reserved exclusively for the *Top 3 chatters* on the leaderboard!\n\n` +
+      `📈 *How to qualify:*\n` +
+      `• Chat actively with strangers\n` +
+      `• Maintain your daily chat streak (🔥)\n` +
+      `• Earn high star ratings (⭐) from partners\n\n` +
+      `Keep chatting to claim your spot in the Top 3! 🚀`,
+      { parse_mode:'Markdown' }
+    );
+  }
 });
+
 bot.command('game', async ctx => {
   const m = tgToAnon[ctx.from.id]; if (!m) return ctx.reply('Start a chat first to play games! 🎮');
   const chat = activeChats.get(m.chatId); if (!chat) return ctx.reply('No active chat found.');
@@ -900,12 +1009,14 @@ bot.command('game', async ctx => {
     [Markup.button.callback('❌ Cancel', 'gm_cancel')],
   ]) });
 });
+
 bot.command('report', async ctx => {
   const s = ensureSession(ctx); const m = tgToAnon[ctx.from.id];
   if (!m) return ctx.reply('No active chat to report.');
   s.awaitingComplaint = { accusedAnon: m.partnerAnon };
   await ctx.reply('📝 Describe the violation briefly:');
 });
+
 bot.command('leaderboard', showLeaderboard);
 bot.command('refer',       showReferral);
 bot.command('premium',     showPremiumPage);
@@ -914,17 +1025,16 @@ bot.command('mood',        showMoodPicker);
 bot.command('language',    showLanguagePicker);
 
 // ─── LOBBY HEARS ──────────────────────────────────────────────────────────────
-bot.hears('🚀 Random Chat',       ctx => startSearch(ctx, { mode:'random' }));
-bot.hears('😍 Flirt Chat',        ctx => startSearch(ctx, { mode:'random', flirt:true }));
-bot.hears('🔍 Match by Interest', showInterestPicker);
-bot.hears('🎭 Match by Mood',     showMoodPicker);
-bot.hears('👤 Profile',           ctx => bot.handleUpdate({...ctx.update, message:{...ctx.message, text:'/profile'}}));
-bot.hears('🎁 Daily Bonus',       ctx => bot.handleUpdate({...ctx.update, message:{...ctx.message, text:'/bonus'}}));
-bot.hears('📊 Leaderboard',       showLeaderboard);
-bot.hears('🎮 Mini Games',        ctx => ctx.reply('Start a chat first, then use /game! 🎮'));
-bot.hears('💎 Go Premium',        showPremiumPage);
-bot.hears('🔗 Refer & Earn',      showReferral);
-bot.hears('🤖 Our Bots',          showOurBots);
+bot.hears('🚀 Random Chat',                    ctx => startSearch(ctx, { mode:'random' }));
+bot.hears(['🔥 Flirt Chat', '😍 Flirt Chat'],  ctx => startSearch(ctx, { mode:'flirt' }));
+bot.hears('🔍 Match by Interest',              showInterestPicker);
+bot.hears('🎭 Match by Mood',                  showMoodPicker);
+bot.hears('👤 Profile',                        ctx => bot.handleUpdate({...ctx.update, message:{...ctx.message, text:'/profile'}}));
+bot.hears('🎁 Daily Bonus',                    ctx => bot.handleUpdate({...ctx.update, message:{...ctx.message, text:'/bonus'}}));
+bot.hears('🎮 Mini Games',                     ctx => ctx.reply('Start a chat first, then use /game! 🎮'));
+bot.hears('💎 Go Premium',                     showPremiumPage);
+bot.hears('🔗 Refer & Earn',                   showReferral);
+bot.hears('🤖 Our Bots',                       showOurBots);
 bot.hears('❌ Cancel Search',     async ctx => {
   const s = ensureSession(ctx);
   if (s.searchingSince) { removeFromPools(s.anon_id); s.searchingSince = null; return ctx.reply('🛑 Search cancelled.', lobbyKb()); }
@@ -950,11 +1060,91 @@ bot.action('complain', async ctx => {
 });
 bot.action('btn_next', async ctx => {
   await ctx.answerCbQuery(); const s = ensureSession(ctx);
-  if (tgToAnon[ctx.from.id]?.chatId) { await endChatForUser(s.anon_id, 'user_next'); s.inChat = false; }
+  if (isUserInChat(ctx.from.id)) { await endChatForUser(s.anon_id, 'user_next', ctx.from.id); }
+  s.inChat = false;
+  s.searchingSince = null;
+  removeFromPools(s.anon_id);
   await startSearch(ctx, { mode:'random' });
 });
 bot.action('go_lobby', async ctx => { await ctx.answerCbQuery(); await ctx.reply("🏠 You're in the lobby.", lobbyKb()); });
 bot.action(/filter_(.+)/, async ctx => { await ctx.answerCbQuery(); await startSearch(ctx, { mode:'random', genderPref: ctx.match[1]==='any'?null:ctx.match[1] }); });
+
+// Onboarding callbacks
+bot.action(/ob_g_(.+)/, async ctx => {
+  await ctx.answerCbQuery();
+  const s = ensureSession(ctx);
+  const g = ctx.match[1];
+  if (g !== 'skip') {
+    db.prepare('UPDATE users SET gender=? WHERE anon_id=?').run(g, s.anon_id);
+  }
+  await ctx.editMessageText(
+    `✅ Gender saved!\n\n*Step 2 of 3: What's your vibe today? (Mood)*`,
+    {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('😊 Happy', 'ob_m_Happy'), Markup.button.callback('🔥 Flirty', 'ob_m_Flirty')],
+        [Markup.button.callback('😂 Funny', 'ob_m_Funny'), Markup.button.callback('😴 Chill', 'ob_m_Chill')],
+        [Markup.button.callback('🤔 Deep / Philosophical', 'ob_m_Philosophical')],
+        [Markup.button.callback('⏩ Skip Mood', 'ob_m_skip')]
+      ])
+    }
+  );
+});
+
+bot.action(/ob_m_(.+)/, async ctx => {
+  await ctx.answerCbQuery();
+  const s = ensureSession(ctx);
+  const m = ctx.match[1];
+  if (m !== 'skip') {
+    db.prepare('UPDATE users SET mood=? WHERE anon_id=?').run(m, s.anon_id);
+  }
+  const tags = INTEREST_TAGS.slice(0, 8);
+  const rows = [];
+  for (let i = 0; i < tags.length; i += 2) {
+    rows.push([
+      Markup.button.callback(tags[i], `ob_i_${tags[i]}`),
+      tags[i+1] ? Markup.button.callback(tags[i+1], `ob_i_${tags[i+1]}`) : null
+    ].filter(Boolean));
+  }
+  rows.push([Markup.button.callback('✅ Complete Setup', 'ob_done')]);
+
+  await ctx.editMessageText(
+    `✅ Mood saved!\n\n*Step 3 of 3: Tap any interests you like (or Complete Setup):*`,
+    {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard(rows)
+    }
+  );
+});
+
+bot.action(/ob_i_(.+)/, async ctx => {
+  const s = ensureSession(ctx);
+  const tag = ctx.match[1];
+  const u = getUser(s.anon_id);
+  const cur = u.interests ? u.interests.split(',') : [];
+  if (!cur.includes(tag)) {
+    cur.push(tag);
+    db.prepare('UPDATE users SET interests=? WHERE anon_id=?').run(cur.join(','), s.anon_id);
+    await ctx.answerCbQuery(`Added ${tag}!`);
+  } else {
+    await ctx.answerCbQuery(`Already added!`);
+  }
+});
+
+bot.action('ob_done', async ctx => {
+  await ctx.answerCbQuery('Setup complete!');
+  const s = ensureSession(ctx);
+  const u = getUser(s.anon_id);
+  await ctx.reply(
+    `🎉 *Profile Ready!*\n\n` +
+    `👤 *Gender:* ${u.gender || 'Not specified'}\n` +
+    `🎭 *Mood:* ${u.mood || 'Not specified'}\n` +
+    `🏷 *Interests:* ${u.interests || 'None selected'}\n\n` +
+    `You're all set to chat anonymously! Tap *🚀 Random Chat* or *🔥 Flirt Chat* below:`,
+    { parse_mode: 'Markdown', ...lobbyKb() }
+  );
+});
+
 bot.action(/interest_(.+)/, async ctx => {
   if (ctx.match[1]==='done') { await ctx.answerCbQuery('Saved!'); const s=ensureSession(ctx); const u=getUser(s.anon_id); return ctx.editMessageText(`✅ Interests saved: ${u.interests||'none'}`); }
   await ctx.answerCbQuery(); const s=ensureSession(ctx); const tag=ctx.match[1]; const u=getUser(s.anon_id);
@@ -1067,15 +1257,17 @@ bot.on('message', async (ctx, next) => {
       if (ctx.message.text) await bot.telegram.sendMessage(m.partnerTg, text, { protect_content:true });
       else if (ctx.message.sticker) await bot.telegram.sendSticker(m.partnerTg, ctx.message.sticker.file_id, { protect_content:true });
       else { await ctx.reply('🚫 Only text & stickers allowed for privacy & safety.'); return; }
-    } catch(e) { console.error('Forward error:', e.message); }
+    } catch(e) {
+      console.error('Forward error:', e.message);
+      // If partner blocked the bot or deleted Telegram
+      if (e.message && (e.message.includes('blocked') || e.message.includes('deactivated') || e.message.includes('not found') || e.message.includes('chat not found'))) {
+        await ctx.reply('⚠️ *Your partner has left or blocked the bot.*', { parse_mode:'Markdown', ...endChatKb() });
+        await endChat(chatId, 'partner_left');
+        return;
+      }
+    }
     if (chat.a_tg === tg_id) chat.a_msgs++; else chat.b_msgs++;
     db.prepare('UPDATE users SET total_messages=total_messages+1 WHERE anon_id=?').run(m.anon);
-    if (chat.idleTimer) {
-      clearTimeout(chat.idleTimer);
-      const u   = getUser(m.anon);
-      const ms  = u.vip_tier >= 2 ? 30*60*1000 : 15*60*1000;
-      chat.idleTimer = setTimeout(() => endChat(chatId, 'idle_timeout'), ms);
-    }
     return;
   }
 
@@ -1112,11 +1304,14 @@ async function showLanguagePicker(ctx) {
   await ctx.reply('🌐 *Preferred language:*', { parse_mode:'Markdown', ...Markup.inlineKeyboard(rows) });
 }
 async function showLeaderboard(ctx) {
+  if (!isAdmin(ctx)) {
+    return ctx.reply('🔒 The Leaderboard is viewable on our Admin Web Dashboard.\n\nKeep chatting to earn streaks and climb the ranks!');
+  }
   const top = db.prepare(`SELECT anon_id,chat_count,streak_days,total_messages,CASE WHEN rating_count>0 THEN ROUND(CAST(rating_sum AS FLOAT)/rating_count,1) ELSE 0 END as avg_rating FROM users ORDER BY chat_count DESC LIMIT 10`).all();
   if (!top.length) return ctx.reply('No users yet!');
   const m=['🥇','🥈','🥉'];
   const lines=top.map((u,i)=>`${m[i]||`${i+1}.`} \`${u.anon_id.slice(0,6)}...\` | 💬${u.chat_count} | 🔥${u.streak_days}d | ⭐${u.avg_rating}`).join('\n');
-  await ctx.reply(`📊 *Top Chatters*\n\n${lines}`, { parse_mode:'Markdown' });
+  await ctx.reply(`📊 *Admin Leaderboard Preview*\n\n${lines}`, { parse_mode:'Markdown' });
 }
 async function showReferral(ctx) {
   const s=ensureSession(ctx); const u=getUser(s.anon_id);
