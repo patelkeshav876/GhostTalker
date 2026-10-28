@@ -23,7 +23,7 @@ const express   = require('express');
 const BOT_TOKEN    = process.env.BOT_TOKEN;
 const ADMIN_IDS    = (process.env.ADMIN_IDS || '').split(',').map(x => parseInt(x)).filter(Boolean);
 const DB_FILE      = process.env.DB_FILE      || './anonymtalks.db';
-const BOT_USERNAME = process.env.BOT_USERNAME || 'AnonymTalksBot';
+const BOT_USERNAME = process.env.BOT_USERNAME || 'TheGhostTalk_Bot';
 const PORT         = parseInt(process.env.PORT || '3000');
 // Secret for web dashboard API — set a strong random value in .env
 const DASH_SECRET  = process.env.DASH_SECRET  || 'change_me_in_env';
@@ -170,6 +170,12 @@ async function initDB() {
     if (!db.prepare('SELECT key FROM bot_stats WHERE key=?').get(k))
       db.prepare('INSERT INTO bot_stats(key,value) VALUES(?,0)').run(k);
   });
+
+  const mbCount = db.prepare('SELECT COUNT(*) as c FROM managed_bots').get()?.c || 0;
+  if (mbCount === 0) {
+    db.prepare('INSERT INTO managed_bots(name,username,description,features,category,link,icon,active) VALUES(?,?,?,?,?,?,?,1)')
+      .run('GhostTalk', 'TheGhostTalk_Bot', 'Anonymous 1:1 chat bot. Match with strangers worldwide instantly.', 'Anonymous,Fast Matching,Mini Games', 'Chat', 'https://t.me/TheGhostTalk_Bot', '👻');
+  }
 }
 
 // ─── DB HELPERS ───────────────────────────────────────────────────────────────
@@ -273,6 +279,12 @@ const lobbyKb  = () => Markup.keyboard([
   ['👤 Profile', '🎁 Daily Bonus'],
   ['🎮 Mini Games', '🔗 Refer & Earn'],
   ['💎 Go Premium', '🤖 Our Bots'],
+]).resize();
+
+// In-chat keyboard (replaces Cancel Search and gives simple one-tap access)
+const inChatKb = () => Markup.keyboard([
+  ['⏭ Next Chat', '🛑 End Chat'],
+  ['🎮 Mini Game', '⭐ Rate Partner']
 ]).resize();
 
 const searchKb = () => Markup.keyboard([['❌ Cancel Search']]).resize();
@@ -394,8 +406,8 @@ async function connectPair(a, b) {
   tgToAnon[b.tg_id] = { anon:b.anon_id, chatId, partnerAnon:a.anon_id, partnerTg:a.tg_id, startedAt:start };
   const uA = getUser(a.anon_id), uB = getUser(b.anon_id);
   const sA = updateStreak(a.anon_id), sB = updateStreak(b.anon_id);
-  try { await bot.telegram.sendMessage(a.tg_id, buildFoundMsg(uB, sA), { parse_mode:'Markdown', protect_content:true, ...chatKb() }); } catch(e) {}
-  try { await bot.telegram.sendMessage(b.tg_id, buildFoundMsg(uA, sB), { parse_mode:'Markdown', protect_content:true, ...chatKb() }); } catch(e) {}
+  try { await bot.telegram.sendMessage(a.tg_id, buildFoundMsg(uB, sA), { parse_mode:'Markdown', protect_content:true, ...inChatKb() }); } catch(e) {}
+  try { await bot.telegram.sendMessage(b.tg_id, buildFoundMsg(uA, sB), { parse_mode:'Markdown', protect_content:true, ...inChatKb() }); } catch(e) {}
 }
 
 function buildFoundMsg(p, streak) {
@@ -409,8 +421,7 @@ function buildFoundMsg(p, streak) {
     p?.mood      ? `🎭 *Mood:* ${p.mood}` : '',
     `🏆 *Rating:* ${r} ${stars}`,
     '',
-    `🔥 *Your streak:* ${streak} day(s)`, '',
-    `_/next · /stop · /game · /report_`,
+    `🔥 *Your streak:* ${streak} day(s)`,
   ].filter(Boolean).join('\n');
 }
 
@@ -438,10 +449,10 @@ async function endChat(chatId, reason = 'ended', initiatorTg = null) {
       note = '⚠️ *Your partner disconnected or left the bot.*';
     }
 
-    const txt = [`💬 *Chat ended!*`, durationStr, note, '', 'What would you like to do next?']
+    const txt = [`💬 *Chat ended!*`, durationStr, note, '', 'Choose an option below to start your next chat:']
       .filter(Boolean).join('\n');
 
-    try { await bot.telegram.sendMessage(id, txt, { parse_mode:'Markdown', ...endChatKb() }); } catch(e) {}
+    try { await bot.telegram.sendMessage(id, txt, { parse_mode:'Markdown', ...lobbyKb() }); } catch(e) {}
   }
 
   logChat(chatId, chat.a_anon, chat.b_anon, new Date(chat.startedAt).toISOString(), new Date().toISOString(), total, reason);
@@ -551,46 +562,139 @@ async function startOnboarding(ctx, anon_id) {
 
 // ─── MINI GAMES ───────────────────────────────────────────────────────────────
 const TRIVIA = [
-  { q:'What planet is closest to the sun?',a:'mercury',hint:'Starts with M' },
-  { q:'How many continents?',a:'7',hint:'Single digit' },
-  { q:'What gas do plants absorb?',a:'co2',hint:'Carbon...' },
-  { q:'Who painted the Mona Lisa?',a:'da vinci',hint:'Italian artist' },
-  { q:'Largest ocean?',a:'pacific',hint:'Starts with P' },
-  { q:'Capital of Japan?',a:'tokyo',hint:'Modern megacity' },
-  { q:'Fastest land animal?',a:'cheetah',hint:'Big cat' },
+  { q:'What planet is closest to the sun?', a:'mercury', hint:'Starts with M' },
+  { q:'How many continents are on Earth?', a:'7', hint:'Single digit number' },
+  { q:'What gas do green plants absorb from the air?', a:'co2', hint:'Carbon...' },
+  { q:'Who painted the Mona Lisa?', a:'da vinci', hint:'Famous Italian renaissance artist' },
+  { q:'What is the largest ocean on Earth?', a:'pacific', hint:'Starts with P' },
+  { q:'What is the capital of Japan?', a:'tokyo', hint:'Modern neon metropolis' },
+  { q:'What is the fastest land animal?', a:'cheetah', hint:'Spotted big cat' },
+  { q:'Which element has the chemical symbol Au?', a:'gold', hint:'Precious yellow metal' },
+  { q:'How many colors are in a standard rainbow?', a:'7', hint:'VIBGYOR' },
+  { q:'What is the hardest natural mineral on Earth?', a:'diamond', hint:'Used in luxury rings' },
+  { q:'Which country originated tea as a drink?', a:'china', hint:'Asian nation' },
+  { q:'What is the highest mountain peak above sea level?', a:'everest', hint:'Located in Himalayas' },
+  { q:'How many bones are in the adult human body?', a:'206', hint:'Between 200 and 210' },
+  { q:'What planet is famously known as the Red Planet?', a:'mars', hint:'Named after the god of war' },
+  { q:'Which animal is culturally called the King of the Jungle?', a:'lion', hint:'Big feline with a mane' },
+  { q:'What is the capital city of France?', a:'paris', hint:'City of lights & Eiffel tower' },
+  { q:'What currency is officially used in the United Kingdom?', a:'pound', hint:'Symbol: £' },
+  { q:'How many seconds are in one full hour?', a:'3600', hint:'60 x 60' },
+  { q:'Which musical instrument has 88 black and white keys?', a:'piano', hint:'Grand or upright' },
+  { q:'What is the freezing temperature of water in Celsius?', a:'0', hint:'Freezing baseline' },
+  { q:'Who wrote the tragedy Romeo and Juliet?', a:'shakespeare', hint:'The Bard of Avon' },
+  { q:'What is the largest living mammal on Earth?', a:'blue whale', hint:'Marine ocean giant' },
+  { q:'Which organ pumps blood throughout the human body?', a:'heart', hint:'Beats in your chest' },
+  { q:'What is the capital city of Australia?', a:'canberra', hint:'Not Sydney, not Melbourne' },
+  { q:'What is the primary green ingredient in guacamole?', a:'avocado', hint:'Creamy green fruit' },
+  { q:'How many players per team are on the field in football/soccer?', a:'11', hint:'Double digit' },
+  { q:'Which continent is home to the Nile river and pyramids?', a:'africa', hint:'Second largest continent' },
+  { q:'What is the square root of 64?', a:'8', hint:'8 x 8' },
+  { q:'Which solar system planet is famous for giant icy rings?', a:'saturn', hint:'6th planet from Sun' },
+  { q:'Which white bird is an international symbol of peace?', a:'dove', hint:'Pigeon family' }
 ];
+
 const WYR = [
-  'Would you rather have the ability to fly OR be invisible?',
-  'Would you rather live in the future OR the past?',
-  'Would you rather be famous OR be rich in private?',
-  'Would you rather speak all languages OR play all instruments?',
+  'Would you rather have the ability to fly OR be completely invisible?',
+  'Would you rather live 500 years in the future OR 500 years in the past?',
+  'Would you rather be world-famous OR billionaire-rich in absolute secret?',
+  'Would you rather speak all human languages OR play every musical instrument?',
+  'Would you rather explore the furthest depths of space OR the deepest trenches of the ocean?',
+  'Would you rather never need sleep again OR never need to eat food again?',
+  'Would you rather find your soulmate today OR win a guaranteed $10,000,000?',
+  'Would you rather be able to read thoughts OR see 10 minutes into the future?',
+  'Would you rather live on a sunny tropical beach OR in a cozy snow-covered mountain cabin?',
+  'Would you rather always arrive 20 minutes early OR 20 minutes late?',
+  'Would you rather live without music forever OR without movies/shows forever?',
+  'Would you rather know the date of your death OR the cause of your death?',
+  'Would you rather have free unlimited flights anywhere OR free unlimited dining at any restaurant?',
+  'Would you rather be the funniest person in any room OR the most attractive person in any room?',
+  'Would you rather give up your smartphone for a month OR give up sugar/junk food for a year?',
+  'Would you rather fight 1 horse-sized duck OR 100 duck-sized horses?',
+  'Would you rather have a life pause button OR a life rewind button?',
+  'Would you rather be trapped in a cheesy romantic comedy OR a psychological thriller?',
+  'Would you rather never feel physical anger OR never feel emotional sadness?',
+  'Would you rather be able to communicate with animals OR speak every foreign language fluently?',
+  'Would you rather date someone who talks non-stop OR someone who barely says 10 words a day?',
+  'Would you rather have terrible WiFi everywhere you go OR a phone battery that never goes above 15%?',
+  'Would you rather be able to teleport anywhere instantly OR possess super-human strength?',
+  'Would you rather know all the mysteries of the universe OR live completely stress-free forever?',
+  'Would you rather always have to say exactly what you are thinking OR never speak again?',
+  'Would you rather be reincarnated as a majestic eagle OR as a pampered house cat?',
+  'Would you rather win an Olympic Gold medal OR an Academy Award (Oscar)?',
+  'Would you rather lose the ability to lie OR believe every lie anyone tells you?',
+  'Would you rather have unlimited free coffee/tea for life OR unlimited free pizza/burgers?',
+  'Would you rather live in a world where everyone knows your name OR a world where nobody knows who you are?'
 ];
+
 const TOD = [
-  ["What's your most embarrassing memory?", 'Say "I am the champion" in a voice message!'],
-  ["One lie you've told recently?", 'Type with your eyes closed!'],
-  ["Your guilty pleasure?", 'Share your most used emoji!'],
+  ["What is your most embarrassing memory that keeps you awake at night?", 'Send a voice message loudly declaring: "I am the champion!"'],
+  ["What is one harmless lie you told recently to someone?", 'Type a full 10-word sentence with your eyes closed!'],
+  ["What is your absolute biggest guilty pleasure?", 'Send the 3 most recently used emojis from your keyboard!'],
+  ["Who was your very first childhood crush?", 'Send an honest compliment to your partner in ALL CAPS!'],
+  ["What is your weirdest or most irrational fear?", 'Send the most random or funny sticker/GIF you have!'],
+  ["What is something everyone loves that you secretly dislike?", 'Send a voice message whispering your favorite food!'],
+  ["Have you ever secretly stalked an ex or crush on social media?", 'Rate your partner\'s vibe right now on a scale of 1 to 10 with a reason!'],
+  ["What is the strangest food combination that you actually enjoy?", 'Send a recommendation for one song that defines your mood today!'],
+  ["What is a hidden or unusual talent that you possess?", 'Send a voice message imitating your favorite animal sound!'],
+  ["Have you ever made up an excuse to escape a boring conversation or date?", 'Send a dramatic movie quote pretending you are in an action movie!'],
+  ["What is the most childish thing that you still do as an adult?", 'Send 3 emojis that describe your anonymous partner based on this chat!'],
+  ["If you could erase one past mistake from existence, what would it be?", 'Describe your anonymous partner using only 3 adjectives!'],
+  ["What is the worst piece of advice you have ever followed?", 'Write a fun 2-line rhyme about chatting with strangers!'],
+  ["Do you believe in love at first sight or love at first conversation?", 'Tell your partner the funniest clean joke you know!'],
+  ["What is your biggest everyday pet peeve that annoys you instantly?", 'Send a short voice note singing the chorus of any song you like!'],
+  ["Have you ever had a crush on a cartoon or fictional character?", 'Send a funny photo or sticker that matches your reaction to this question!'],
+  ["What is something you genuinely like about yourself?", 'Say something positive about your partner out loud right now!'],
+  ["What is the craziest thing you have ever done spontaneously?", 'Send 5 emojis that represent your entire day today!'],
+  ["Have you ever ghosted someone, and why did you do it?", 'Write a quick 2-line poetic compliment for your partner!'],
+  ["What is one dream you haven't shared with people in real life?", 'Give your chat partner a fun nickname for the rest of this session!'],
+  ["What was the most awkward handshake, high-five, or hug you ever had?", 'Share your favorite quote or life motto with your partner!'],
+  ["What is the worst gift you have ever received from someone?", 'Describe your dream vacation destination in one descriptive sentence!'],
+  ["What is your favorite late-night guilty habit?", 'Guess your partner\'s favorite music genre or hobby!'],
+  ["Who is your biggest celebrity or influencer crush right now?", 'Confess what your first impression of your partner was!'],
+  ["What is the biggest risk you have taken that paid off?", 'Send a friendly voice note saying: "Hello stranger, hope you\'re having a great day!"'],
+  ["If you won $1,000,000 tomorrow, what is the very first purchase?", 'Tell your partner one reason you enjoy talking to them!'],
+  ["What is the most trouble you ever got into in school?", 'Type a sentence without using the letter "e"!'],
+  ["Have you ever practiced speaking or posing in front of a mirror?", 'Send a sticker that represents your current energy level!'],
+  ["What is one thing on your bucket list you must do before you die?", 'Ask your partner any personal question of your own choosing!'],
+  ["If you could change one thing about yourself, what would it be?", 'Send your partner a virtual high five and a warm wish!']
 ];
 
 async function startGame(chatId, name, tgA, tgB) {
   let msg = '', state = {};
+  let buttonLabel = '🔄 Next Question';
   if (name === 'trivia') {
     const q = TRIVIA[Math.floor(Math.random() * TRIVIA.length)];
     state = { type:'trivia', question:q, answered:false };
-    msg   = `🎯 *Trivia!*\n\n❓ ${q.q}\n💡 Hint: ${q.hint}\n\nFirst correct answer wins!`;
+    msg   = `🎯 *Trivia!*\n\n❓ ${q.q}\n💡 Hint: ${q.hint}\n\n_First correct answer wins!_`;
+    buttonLabel = '🎯 Next Question';
   } else if (name === 'wyr') {
     const q = WYR[Math.floor(Math.random() * WYR.length)];
     state = { type:'wyr', question:q };
-    msg   = `🤔 *Would You Rather?*\n\n${q}\n\nBoth reply with your choice!`;
+    msg   = `🤔 *Would You Rather?*\n\n${q}\n\n_Both reply with your choice!_`;
+    buttonLabel = '🤔 Next Dilemma';
   } else if (name === 'tod') {
     const p = TOD[Math.floor(Math.random() * TOD.length)];
     state = { type:'tod', truth:p[0], dare:p[1] };
-    msg   = `🎲 *Truth or Dare?*\n\n🔍 Truth: ${p[0]}\n💥 Dare: ${p[1]}\n\nPick one!`;
+    msg   = `🎲 *Truth or Dare?*\n\n🔍 *Truth:* ${p[0]}\n💥 *Dare:* ${p[1]}\n\n_Pick one!_`;
+    buttonLabel = '🎲 Next Truth & Dare';
   } else if (name === 'wordchain') {
     state = { type:'wordchain', lastWord:null, usedWords:[], turn:tgA };
     msg   = `🔤 *Word Chain!*\nEach word must start with the last letter of the previous.\nYou start:`;
+    buttonLabel = '🔄 Restart Word Chain';
   }
   gameStates.set(chatId, state);
-  for (const id of [tgA, tgB]) try { await bot.telegram.sendMessage(id, msg, { parse_mode:'Markdown' }); } catch(e) {}
+
+  const gameKb = Markup.inlineKeyboard([
+    [
+      Markup.button.callback(buttonLabel, `gm_next_${name}_${chatId}`),
+      Markup.button.callback('🛑 Stop Game', `sg_${chatId}`)
+    ]
+  ]);
+
+  for (const id of [tgA, tgB]) {
+    try { await bot.telegram.sendMessage(id, msg, { parse_mode:'Markdown', ...gameKb }); } catch(e) {}
+  }
 }
 
 async function handleGameInput(chatId, tg_id, text) {
@@ -598,10 +702,16 @@ async function handleGameInput(chatId, tg_id, text) {
   const chat = activeChats.get(chatId); if (!chat) return false;
   const partner = chat.a_tg === tg_id ? chat.b_tg : chat.a_tg;
   if (game.type === 'trivia' && !game.answered) {
-    if (text.toLowerCase().trim() === game.question.a) {
-      game.answered = true; gameStates.delete(chatId);
-      try { await bot.telegram.sendMessage(tg_id, `✅ *Correct!* 🎉 Use /game to play again.`, { parse_mode:'Markdown' }); } catch(e) {}
-      try { await bot.telegram.sendMessage(partner, `❌ Partner got it! Answer: *${game.question.a}*`, { parse_mode:'Markdown' }); } catch(e) {}
+    if (text.toLowerCase().trim() === game.question.a.toLowerCase().trim()) {
+      game.answered = true;
+      const nextKb = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🎯 Next Question', `gm_next_trivia_${chatId}`),
+          Markup.button.callback('🛑 Stop Game', `sg_${chatId}`)
+        ]
+      ]);
+      try { await bot.telegram.sendMessage(tg_id, `✅ *Correct!* Answer: *${game.question.a}* 🎉`, { parse_mode:'Markdown', ...nextKb }); } catch(e) {}
+      try { await bot.telegram.sendMessage(partner, `❌ Partner got it! Answer was: *${game.question.a}*`, { parse_mode:'Markdown', ...nextKb }); } catch(e) {}
       return true;
     }
   }
@@ -846,9 +956,16 @@ async function showPremiumPage(ctx) {
 
 // ─── OUR BOTS (public view) ────────────────────────────────────────────────────
 async function showOurBots(ctx) {
-  const bots = db.prepare('SELECT * FROM managed_bots WHERE active=1 ORDER BY sort_order ASC, added_at DESC').all();
+  let bots = db.prepare('SELECT * FROM managed_bots WHERE active=1 ORDER BY sort_order ASC, added_at DESC').all();
   if (!bots.length) {
-    return ctx.reply('🤖 *Our Bots*\n\nNo bots available right now. Check back soon!', { parse_mode:'Markdown', ...lobbyKb() });
+    bots = [{
+      name: 'GhostTalk',
+      username: 'TheGhostTalk_Bot',
+      description: 'Anonymous 1:1 chat bot with zero traces. Fast matchmaking, mini-games & streaks.',
+      category: 'Chat',
+      link: 'https://t.me/TheGhostTalk_Bot',
+      icon: '👻'
+    }];
   }
   const bycat = {};
   for (const b of bots) { if (!bycat[b.category]) bycat[b.category] = []; bycat[b.category].push(b); }
@@ -1024,20 +1141,82 @@ bot.command('interests',   showInterestPicker);
 bot.command('mood',        showMoodPicker);
 bot.command('language',    showLanguagePicker);
 
-// ─── LOBBY HEARS ──────────────────────────────────────────────────────────────
+// ─── LOBBY & IN-CHAT HEARS ───────────────────────────────────────────────────
 bot.hears('🚀 Random Chat',                    ctx => startSearch(ctx, { mode:'random' }));
 bot.hears(['🔥 Flirt Chat', '😍 Flirt Chat'],  ctx => startSearch(ctx, { mode:'flirt' }));
 bot.hears('🔍 Match by Interest',              showInterestPicker);
 bot.hears('🎭 Match by Mood',                  showMoodPicker);
 bot.hears('👤 Profile',                        ctx => bot.handleUpdate({...ctx.update, message:{...ctx.message, text:'/profile'}}));
 bot.hears('🎁 Daily Bonus',                    ctx => bot.handleUpdate({...ctx.update, message:{...ctx.message, text:'/bonus'}}));
-bot.hears('🎮 Mini Games',                     ctx => ctx.reply('Start a chat first, then use /game! 🎮'));
 bot.hears('💎 Go Premium',                     showPremiumPage);
 bot.hears('🔗 Refer & Earn',                   showReferral);
 bot.hears('🤖 Our Bots',                       showOurBots);
+
+// In-chat fast action buttons
+bot.hears(['⏭ Next Chat', '/next'], async ctx => {
+  const s = ensureSession(ctx);
+  if (isUserInChat(ctx.from.id)) { await endChatForUser(s.anon_id, 'user_next', ctx.from.id); }
+  s.inChat = false;
+  s.searchingSince = null;
+  removeFromPools(s.anon_id);
+  await startSearch(ctx, { mode:'random' });
+});
+
+bot.hears(['🛑 End Chat', '🛑 Stop Chat', '/stop'], async ctx => {
+  const s = ensureSession(ctx);
+  s.inChat = false;
+  if (s.searchingSince) {
+    removeFromPools(s.anon_id);
+    s.searchingSince = null;
+    return ctx.reply('🛑 Search cancelled.', lobbyKb());
+  }
+  if (isUserInChat(ctx.from.id)) {
+    await endChatForUser(s.anon_id, 'user_stop', ctx.from.id);
+  } else {
+    await ctx.reply("🏠 You're in the lobby.", lobbyKb());
+  }
+});
+
+bot.hears(['🎮 Mini Game', '🎮 Mini Games', '/game'], async ctx => {
+  const m = tgToAnon[ctx.from.id];
+  if (!m) return ctx.reply('Start a chat first to play games! 🎮', lobbyKb());
+  const chat = activeChats.get(m.chatId);
+  if (!chat) return ctx.reply('No active chat found.', lobbyKb());
+  if (gameStates.has(m.chatId)) {
+    return ctx.reply('🎮 A game is already in progress!', Markup.inlineKeyboard([
+      [Markup.button.callback('🛑 Stop Current Game', `sg_${m.chatId}`)]
+    ]));
+  }
+  await ctx.reply('🎮 *Choose a Mini Game:*', {
+    parse_mode:'Markdown',
+    ...Markup.inlineKeyboard([
+      [Markup.button.callback('🧠 Trivia', `gm_trivia_${m.chatId}`),    Markup.button.callback('🤔 Would You Rather', `gm_wyr_${m.chatId}`)],
+      [Markup.button.callback('🎲 Truth or Dare', `gm_tod_${m.chatId}`), Markup.button.callback('🔤 Word Chain', `gm_wordchain_${m.chatId}`)],
+      [Markup.button.callback('❌ Cancel', 'gm_cancel')],
+    ])
+  });
+});
+
+bot.hears(['⭐ Rate Partner'], async ctx => {
+  const m = tgToAnon[ctx.from.id];
+  if (!m?.partnerAnon) return ctx.reply('No active chat partner to rate.');
+  await ctx.reply('⭐ *Rate your current partner:*', Markup.inlineKeyboard([[
+    Markup.button.callback('1⭐','rate_exact_1'), Markup.button.callback('2⭐','rate_exact_2'),
+    Markup.button.callback('3⭐','rate_exact_3'), Markup.button.callback('4⭐','rate_exact_4'),
+    Markup.button.callback('5⭐','rate_exact_5'),
+  ]]));
+});
+
 bot.hears('❌ Cancel Search',     async ctx => {
   const s = ensureSession(ctx);
-  if (s.searchingSince) { removeFromPools(s.anon_id); s.searchingSince = null; return ctx.reply('🛑 Search cancelled.', lobbyKb()); }
+  if (s.searchingSince) {
+    removeFromPools(s.anon_id);
+    s.searchingSince = null;
+    return ctx.reply('🛑 Search cancelled.', lobbyKb());
+  }
+  if (isUserInChat(ctx.from.id)) {
+    return ctx.reply('💬 You are currently in an active chat! Use the buttons below:', inChatKb());
+  }
   return ctx.reply('Not searching.', lobbyKb());
 });
 
@@ -1164,6 +1343,13 @@ bot.action(/lang_(.+)/, async ctx => {
   await ctx.answerCbQuery(); const s=ensureSession(ctx);
   db.prepare('UPDATE users SET language=? WHERE anon_id=?').run(ctx.match[1], s.anon_id);
   await ctx.editMessageText(`🌐 Language set: ${ctx.match[1]}`);
+});
+bot.action(/gm_next_(\w+)_(.+)/, async ctx => {
+  await ctx.answerCbQuery('Loading next question...');
+  const [, name, chatId] = ctx.match;
+  const chat = activeChats.get(chatId);
+  if (!chat) return ctx.reply('No active chat found.');
+  await startGame(chatId, name, chat.a_tg, chat.b_tg);
 });
 bot.action(/gm_(\w+)_(.+)/, async ctx => {
   await ctx.answerCbQuery('Starting!'); const [,name,chatId]=ctx.match;
