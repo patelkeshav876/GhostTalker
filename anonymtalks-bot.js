@@ -338,14 +338,23 @@ const endChatKb = () => Markup.inlineKeyboard([
 function ensureSession(ctx) {
   if (!ctx.session) ctx.session = {};
   if (!ctx.session.anon) {
+    const tg_id = ctx.from?.id;
+    let existing = null;
+    if (tg_id && db) {
+      try {
+        existing = db.prepare('SELECT anon_id, vip_tier FROM users WHERE tg_id=? ORDER BY created_at DESC').get(tg_id);
+      } catch(e) {}
+    }
+    const anon_id = existing?.anon_id || makeAnonId();
+
     ctx.session.anon = {
-      anon_id: makeAnonId(), inChat: false, chatId: null,
+      anon_id: anon_id, inChat: false, chatId: null,
       searchingSince: null, awaitingComplaint: null,
       awaitingBotField: null, awaitingCustomMood: false,
       pendingBot: {},
-      premium: true, vip_tier: 2, queueJump: 0,
+      premium: true, vip_tier: existing?.vip_tier || 2, queueJump: 0,
     };
-    ensureUserRow(ctx.session.anon.anon_id, ctx.from?.id);
+    ensureUserRow(anon_id, tg_id);
   }
   return ctx.session.anon;
 }
@@ -1569,10 +1578,8 @@ bot.action(/filter_(.+)/, async ctx => { await ctx.answerCbQuery(); await startS
 bot.action(/ob_g_(.+)/, async ctx => {
   await ctx.answerCbQuery();
   const s = ensureSession(ctx);
-  const g = ctx.match[1];
-  if (g !== 'skip') {
-    db.prepare('UPDATE users SET gender=? WHERE anon_id=?').run(g, s.anon_id);
-  }
+  const g = ctx.match[1] === 'skip' ? 'unspecified' : ctx.match[1];
+  db.prepare('UPDATE users SET gender=? WHERE anon_id=?').run(g, s.anon_id);
   await ctx.editMessageText(
     `✅ Gender saved!\n\n*Step 2 of 4: Preferred Language*`,
     {
@@ -1660,6 +1667,7 @@ bot.action(/ob_i_(.+)/, async ctx => {
 bot.action('ob_done', async ctx => {
   await ctx.answerCbQuery('Setup complete!');
   const s = ensureSession(ctx);
+  db.prepare("UPDATE users SET gender=COALESCE(gender, 'unspecified') WHERE anon_id=?").run(s.anon_id);
   const u = getUser(s.anon_id);
   await ctx.reply(
     `🎉 *Profile Ready!*\n\n` +
