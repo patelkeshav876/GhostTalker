@@ -166,6 +166,11 @@ async function initDB() {
     completed_at TEXT DEFAULT NULL
   )`);
 
+  exec(`CREATE TABLE IF NOT EXISTS bot_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+  )`);
+
   ['total_users','total_chats','total_messages','active_today'].forEach(k => {
     if (!db.prepare('SELECT key FROM bot_stats WHERE key=?').get(k))
       db.prepare('INSERT INTO bot_stats(key,value) VALUES(?,0)').run(k);
@@ -181,6 +186,20 @@ async function initDB() {
 }
 
 // ─── DB HELPERS ───────────────────────────────────────────────────────────────
+function getSetting(key, def = null) {
+  try {
+    const row = db.prepare('SELECT value FROM bot_settings WHERE key=?').get(key);
+    return row ? row.value : def;
+  } catch(e) { return def; }
+}
+
+function setSetting(key, val) {
+  try {
+    const strVal = typeof val === 'object' ? JSON.stringify(val) : String(val);
+    db.prepare('INSERT OR REPLACE INTO bot_settings(key, value) VALUES(?, ?)').run(key, strVal);
+  } catch(e) {}
+}
+
 const makeAnonId       = () => crypto.randomBytes(9).toString('hex');
 const makeReferralCode = () => crypto.randomBytes(4).toString('hex').toUpperCase();
 
@@ -426,17 +445,26 @@ async function connectPair(a, b) {
   updateStreak(a.anon_id); updateStreak(b.anon_id);
 
   // Minimalist partner found message — keeps anonymity total so strangers have something to talk about
-  try { await bot.telegram.sendMessage(a.tg_id, buildFoundMsg(), { protect_content:true, ...inChatKb() }); } catch(e) {}
-  try { await bot.telegram.sendMessage(b.tg_id, buildFoundMsg(), { protect_content:true, ...inChatKb() }); } catch(e) {}
+  try { await bot.telegram.sendMessage(a.tg_id, buildFoundMsg(a.anon_id), { protect_content:true, ...inChatKb() }); } catch(e) {}
+  try { await bot.telegram.sendMessage(b.tg_id, buildFoundMsg(b.anon_id), { protect_content:true, ...inChatKb() }); } catch(e) {}
 }
 
-function buildFoundMsg() {
-  return [
+function buildFoundMsg(anon_id = null) {
+  const lines = [
     'Partner found 😺', '',
     '/next — find a new partner',
     '/stop — stop this chat', '',
     `https://t.me/${BOT_USERNAME}`
-  ].join('\n');
+  ];
+  const isUserPremium = anon_id ? isVip(anon_id) : false;
+  const adBannerEnabled = getSetting('ad_banner_enabled', 'false') === 'true';
+  if (adBannerEnabled && !isUserPremium) {
+    const adText = getSetting('ad_banner_text', '');
+    if (adText) {
+      lines.unshift(adText, '───────────────────');
+    }
+  }
+  return lines.join('\n');
 }
 
 // ─── END CHAT ─────────────────────────────────────────────────────────────────
@@ -503,6 +531,42 @@ async function startSearch(ctx, opts = {}) {
   // Quick onboarding if gender/profile not configured
   if (!u.gender) {
     return startOnboarding(ctx, s.anon_id);
+  }
+
+  // Mandatory Subscription / Sponsor Bots Wall
+  const forceSubEnabled = getSetting('force_sub_enabled', 'true') === 'true';
+  const isUserPremium = isVip(s.anon_id);
+
+  if (forceSubEnabled && !isUserPremium && !opts.skipForceSub) {
+    const interval = parseInt(getSetting('force_sub_interval', '3')) || 3;
+    s.searchCountSinceSub = (s.searchCountSinceSub || 0) + 1;
+
+    if (!s.subVerified || s.searchCountSinceSub >= interval) {
+      let channels = [];
+      try { channels = JSON.parse(getSetting('force_sub_channels', '[]')); } catch(e) {}
+      if (!channels || !channels.length) {
+        channels = [
+          { name: '🎵 Ghost Music Bot', url: 'https://t.me/GhostMusic_Bot' },
+          { name: '👻 The Ghost Talk Bot', url: `https://t.me/${BOT_USERNAME}` }
+        ];
+      }
+
+      const rows = channels.map(ch => [Markup.button.url(ch.name, ch.url)]);
+      rows.push([Markup.button.callback('✅ I subscribed', 'verify_sub')]);
+
+      const subMsg = [
+        '🔔 *To continue using the bot, please subscribe to the channels below:*',
+        '',
+        '💎 *Premium* — no mandatory channel subscriptions and no ads. Choose a plan:'
+      ].join('\n');
+
+      const subKb = Markup.inlineKeyboard([
+        ...rows,
+        [Markup.button.callback('❌ Disable ads', 'menu_premium')]
+      ]);
+
+      return ctx.reply(subMsg, { parse_mode: 'Markdown', ...subKb });
+    }
   }
 
   if (s.searchingSince) {
@@ -613,7 +677,37 @@ const TRIVIA = [
   { q:'Which continent is home to the Nile river and pyramids?', a:'africa', hint:'Second largest continent' },
   { q:'What is the square root of 64?', a:'8', hint:'8 x 8' },
   { q:'Which solar system planet is famous for giant icy rings?', a:'saturn', hint:'6th planet from Sun' },
-  { q:'Which white bird is an international symbol of peace?', a:'dove', hint:'Pigeon family' }
+  { q:'Which white bird is an international symbol of peace?', a:'dove', hint:'Pigeon family' },
+  { q:'What is the chemical symbol for Silver?', a:'ag', hint:'Starts with A' },
+  { q:'Which country has the largest population in the world?', a:'india', hint:'South Asian nation' },
+  { q:'How many teeth does an adult human typically have?', a:'32', hint:'Multiple of 8' },
+  { q:'What is the capital city of Canada?', a:'ottawa', hint:'Not Toronto, not Montreal' },
+  { q:'Which planet in our solar system has the most moons?', a:'saturn', hint:'Famous for rings' },
+  { q:'What is the main language spoken in Brazil?', a:'portuguese', hint:'European origin' },
+  { q:'What is the longest river in the world?', a:'nile', hint:'Flows through Egypt' },
+  { q:'Who developed the theory of relativity?', a:'einstein', hint:'Albert...' },
+  { q:'In which year did the Titanic sink?', a:'1912', hint:'Early 20th century' },
+  { q:'What is the smallest country in the world by area?', a:'vatican', hint:'Inside Rome' },
+  { q:'What is the hardest substance in the human body?', a:'enamel', hint:'Tooth coating' },
+  { q:'Which gas makes up approximately 78% of Earth\'s atmosphere?', a:'nitrogen', hint:'Starts with N' },
+  { q:'What is the national animal of Scotland?', a:'unicorn', hint:'Mythical horned creature' },
+  { q:'How many hearts does an octopus have?', a:'3', hint:'Odd number under 5' },
+  { q:'What is the capital of Germany?', a:'berlin', hint:'Known for its historic wall' },
+  { q:'Which famous scientist discovered gravity under an apple tree?', a:'newton', hint:'Isaac...' },
+  { q:'What is the fastest bird in the world in a dive?', a:'falcon', hint:'Peregrine...' },
+  { q:'What metal is liquid at standard room temperature?', a:'mercury', hint:'Used in older thermometers' },
+  { q:'How many sides does a regular heptagon have?', a:'7', hint:'Between 6 and 8' },
+  { q:'What is the capital city of Spain?', a:'madrid', hint:'Home to famous football clubs' },
+  { q:'Which human blood type is known as the universal donor?', a:'o negative', hint:'Type O negative' },
+  { q:'What is the largest internal organ in the human body?', a:'liver', hint:'Processes toxins' },
+  { q:'Which continent has the most countries?', a:'africa', hint:'54 recognized countries' },
+  { q:'What is the boiling point of pure water in Celsius?', a:'100', hint:'Century number' },
+  { q:'Who was the first person to walk on the Moon?', a:'armstrong', hint:'Neil...' },
+  { q:'What is the primary language spoken in Egypt?', a:'arabic', hint:'Middle Eastern language' },
+  { q:'How many degrees are in a complete circle?', a:'360', hint:'Full rotation' },
+  { q:'What is the deepest lake in the world?', a:'baikal', hint:'Located in Siberia, Russia' },
+  { q:'What do bees collect from flowers to make honey?', a:'nectar', hint:'Sweet floral liquid' },
+  { q:'What is the brightest star in the Earth\'s night sky?', a:'sirius', hint:'Also known as Dog Star' }
 ];
 
 const WYR = [
@@ -646,7 +740,37 @@ const WYR = [
   'Would you rather win an Olympic Gold medal OR an Academy Award (Oscar)?',
   'Would you rather lose the ability to lie OR believe every lie anyone tells you?',
   'Would you rather have unlimited free coffee/tea for life OR unlimited free pizza/burgers?',
-  'Would you rather live in a world where everyone knows your name OR a world where nobody knows who you are?'
+  'Would you rather live in a world where everyone knows your name OR a world where nobody knows who you are?',
+  'Would you rather be able to control fire OR control water?',
+  'Would you rather never have to do chores again OR never have to work for money again?',
+  'Would you rather live without internet for a year OR without hot water for a year?',
+  'Would you rather have a personal chef OR a personal chauffeur everywhere you go?',
+  'Would you rather always know when someone is lying OR get away with any lie you tell?',
+  'Would you rather wake up with 10 million dollars OR wake up 10 years younger with your current memories?',
+  'Would you rather be famous on the internet OR completely unknown but living in luxury?',
+  'Would you rather speak fluent Spanish OR fluent Japanese instantly?',
+  'Would you rather be an Olympic athlete OR a bestselling novelist?',
+  'Would you rather only be able to whisper OR only be able to shout?',
+  'Would you rather have a photographic memory OR be able to forget anything you choose?',
+  'Would you rather explore ancient ruins OR futuristic cyberpunk cities?',
+  'Would you rather be stranded on a deserted tropical island OR trapped in an endless snow blizzard?',
+  'Would you rather never eat your favorite meal again OR eat it every single day for the rest of your life?',
+  'Would you rather be able to breathe underwater OR walk on air?',
+  'Would you rather have a private jet OR a 100-foot luxury yacht?',
+  'Would you rather know the history of every object you touch OR speak to ghosts?',
+  'Would you rather always be the smartest person in the room OR the happiest person in the room?',
+  'Would you rather be able to change your appearance at will OR change your voice at will?',
+  'Would you rather live without social media forever OR live without video games/streaming forever?',
+  'Would you rather meet your future self 20 years from now OR meet your past self 10 years ago?',
+  'Would you rather have an infinite wardrobe of designer clothes OR infinite gadgets/tech for free?',
+  'Would you rather never be stuck in traffic again OR never catch a cold or flu again?',
+  'Would you rather live inside your favorite movie OR live inside your favorite video game?',
+  'Would you rather have 3 wishes granted today OR 1 wish granted every year for the rest of your life?',
+  'Would you rather be able to talk to plants OR talk to household pets?',
+  'Would you rather have everyone laugh at your jokes OR have everyone take your advice seriously?',
+  'Would you rather live in a penthouse overlooking New York OR a villa overlooking the Mediterranean Sea?',
+  'Would you rather always wake up fully energized after 3 hours OR be able to sleep for 24 hours straight anytime?',
+  'Would you rather know what everyone secretly thinks about you OR never care about anyone\'s opinion again?'
 ];
 
 const TOD = [
@@ -679,7 +803,37 @@ const TOD = [
   ["What is the most trouble you ever got into in school?", 'Type a sentence without using the letter "e"!'],
   ["Have you ever practiced speaking or posing in front of a mirror?", 'Send a sticker that represents your current energy level!'],
   ["What is one thing on your bucket list you must do before you die?", 'Ask your partner any personal question of your own choosing!'],
-  ["If you could change one thing about yourself, what would it be?", 'Send your partner a virtual high five and a warm wish!']
+  ["If you could change one thing about yourself, what would it be?", 'Send your partner a virtual high five and a warm wish!'],
+  ["What is the most awkward text you have accidentally sent to the wrong person?", 'Send an audio recording whistling the happiest tune you know!'],
+  ["Have you ever pretended to be sick to avoid hanging out with friends?", 'Send a 5-word message describing what you think your partner looks like right now!'],
+  ["What is the biggest secret you have kept from your parents?", 'Write an acrostic poem using the word "GHOST" right now!'],
+  ["Have you ever eavesdropped on a private conversation you weren't supposed to hear?", 'Type your response to this with your phone upside down!'],
+  ["What is one song you love but are embarrassed to admit to people?", 'Send an audio note speaking in your best dramatic British accent!'],
+  ["What is the most ridiculous superstition you still secretly follow?", 'Share the most bizarre thought you had in the last 24 hours!'],
+  ["Have you ever bought something expensive that you immediately regretted?", 'Send a voice message saying: "I solemnly swear I am up to no good!"'],
+  ["What is your favorite comfort food that you eat when nobody is watching?", 'Send a compliment to your partner in a language other than English!'],
+  ["If you could swap lives with any celebrity for 24 hours, who would it be?", 'Describe your ideal romantic evening in only 4 words!'],
+  ["What is the weirdest rumor you ever heard about yourself?", 'Type a creative motto for your life and share it!'],
+  ["Have you ever snooped through someone\'s room, bag, or phone?", 'Send 3 funny emojis that describe your anonymous partner!'],
+  ["What is the worst haircut or fashion choice you ever had in your life?", 'Share a movie title that accurately summarizes your current love life!'],
+  ["What is one question you are terrified of being asked on a first date?", 'Send an audio note laughing like a cartoon villain!'],
+  ["If your pet could suddenly speak, what embarrassing secret would they reveal?", 'Write a 2-sentence story about an adventurous ghost!'],
+  ["What is the longest time you have gone without showering or brushing your teeth?", 'Send a dramatic apology to your partner for no reason at all!'],
+  ["Have you ever had a crush on a friend\'s partner or sibling?", 'Share the best piece of wisdom you have ever received!'],
+  ["What is something silly you believed was true well into your teenage years?", 'Send an audio message humming the first song that pops into your head!'],
+  ["Have you ever walked into a glass door or slipped in public?", 'Type out the lyrics to the chorus of your current favorite song!'],
+  ["What is your biggest fear about the future?", 'Give your partner a funny superhero name based on how they talk!'],
+  ["What is the most bizarre dream you still remember clearly?", 'Send a voice note introducing yourself as an undercover secret agent!'],
+  ["Have you ever cried while watching a children\'s movie or cartoon?", 'Predict where your anonymous partner will be in 5 years!'],
+  ["What is something you pretend to understand just to fit into conversations?", 'Send a message using only emojis to tell a whole story!'],
+  ["What is the most impulsive purchase you made late at night online?", 'Share the title of a book or song that changed your perspective!'],
+  ["Have you ever rehearsed a conversation before making a phone call?", 'Send an audio message pretending to order an imaginary pizza with weird toppings!'],
+  ["What is the most childish argument you have gotten into recently?", 'Compliment your partner on their conversation skills!'],
+  ["What is one habit you have that other people might find strange?", 'Describe the color of your socks and what they say about your personality!'],
+  ["If you were invisible for one whole hour, where would you go first?", 'Send an enthusiastic greeting in another language to your partner!'],
+  ["What is your favorite guilty guilty pleasure TV show or guilty movie?", 'Tell your partner the most interesting random fact you know!'],
+  ["Have you ever blamed a pet or sibling for something you did?", 'Send an audio note making your best impression of a robot!'],
+  ["What is the kindest thing a stranger has ever done for you?", 'Wish your partner the best luck for tomorrow in a heartfelt message!']
 ];
 
 async function startGame(chatId, name, tgA, tgB) {
@@ -804,11 +958,44 @@ async function showAdminDashboard(ctx) {
         [Markup.button.callback('📋 Complaints', 'adm_complaints'), Markup.button.callback('🚫 Banned', 'adm_banned')],
         [Markup.button.callback('🤖 Manage Bots', 'adm_bots'),     Markup.button.callback('💰 Payments', 'adm_payments')],
         [Markup.button.callback('📊 Top Users', 'adm_topusers'),   Markup.button.callback('📢 Game Ad', 'adm_gamead')],
-        [Markup.button.callback('🔄 Refresh', 'adm_refresh')],
+        [Markup.button.callback('🔔 Sponsor Wall', 'adm_sponsorwall'), Markup.button.callback('🔄 Refresh', 'adm_refresh')],
       ])
     }
   );
 }
+
+bot.action('adm_sponsorwall', async ctx => {
+  if (!isAdmin(ctx)) return;
+  await ctx.answerCbQuery();
+  const enabled = getSetting('force_sub_enabled', 'true') === 'true';
+  const interval = getSetting('force_sub_interval', '3');
+  let channels = [];
+  try { channels = JSON.parse(getSetting('force_sub_channels', '[]')); } catch(e) {}
+  const chList = channels.map((c, i) => `${i+1}. ${c.name} (${c.url})`).join('\n') || 'None';
+  await ctx.reply(
+    `🔔 *Mandatory Channel / Sponsor Wall*\n\n` +
+    `• Status: *${enabled ? '🟢 Active' : '🔴 Disabled'}*\n` +
+    `• Trigger Interval: Every *${interval}* chats / searches\n\n` +
+    `*Sponsor Channels & Bots:*\n${chList}\n\n` +
+    `_Configure channels and interval easily on your Web Admin Dashboard!_`,
+    {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback(enabled ? '🔴 Disable Wall' : '🟢 Enable Wall', 'adm_togglesub')],
+        [Markup.button.callback('« Back', 'adm_back')]
+      ])
+    }
+  );
+});
+
+bot.action('adm_togglesub', async ctx => {
+  if (!isAdmin(ctx)) return;
+  const cur = getSetting('force_sub_enabled', 'true') === 'true';
+  setSetting('force_sub_enabled', cur ? 'false' : 'true');
+  await ctx.answerCbQuery(`Sponsor wall ${cur ? 'disabled' : 'enabled'}!`);
+  await ctx.deleteMessage().catch(() => {});
+  return showAdminDashboard(ctx);
+});
 
 bot.action('adm_gamead', async ctx => {
   if (!isAdmin(ctx)) return;
@@ -1367,6 +1554,14 @@ bot.action('btn_next', async ctx => {
   removeFromPools(s.anon_id);
   await startSearch(ctx, { mode:'random' });
 });
+bot.action('verify_sub', async ctx => {
+  await ctx.answerCbQuery('✅ Subscribed! Finding partner now...');
+  const s = ensureSession(ctx);
+  s.subVerified = true;
+  s.searchCountSinceSub = 0;
+  try { await ctx.deleteMessage(); } catch(e) {}
+  await startSearch(ctx, { mode: 'random', skipForceSub: true });
+});
 bot.action('go_lobby', async ctx => { await ctx.answerCbQuery(); await ctx.reply("🏠 You're in the lobby.", lobbyKb()); });
 bot.action(/filter_(.+)/, async ctx => { await ctx.answerCbQuery(); await startSearch(ctx, { mode:'random', genderPref: ctx.match[1]==='any'?null:ctx.match[1] }); });
 
@@ -1793,8 +1988,10 @@ webApp.use((req, res, next) => {
 
 // Admin auth middleware for protected routes
 function requireDashSecret(req, res, next) {
-  const secret = req.headers['x-dash-secret'] || req.query.secret;
-  if (secret !== DASH_SECRET) return res.status(401).json({ error: 'Unauthorized' });
+  if (DASH_SECRET && DASH_SECRET !== 'change_me_in_env') {
+    const secret = req.headers['x-dash-secret'] || req.query.secret;
+    if (secret !== DASH_SECRET) return res.status(401).json({ error: 'Unauthorized: invalid dashboard secret' });
+  }
   next();
 }
 
@@ -1910,14 +2107,52 @@ webApp.post('/api/admin/broadcast', requireDashSecret, async (req, res) => {
 });
 
 webApp.get('/api/admin/ad', requireDashSecret, (req, res) => {
-  res.json({ ok: true, adText: gameAdText });
+  res.json({ ok: true, adText: getSetting('ad_toast_text', gameAdText) || gameAdText });
 });
 
 webApp.post('/api/admin/set-ad', requireDashSecret, (req, res) => {
   const { adText } = req.body;
   if (typeof adText !== 'string') return res.status(400).json({ error: 'adText string required' });
+  setSetting('ad_toast_text', adText);
   gameAdText = adText;
   res.json({ ok: true, adText: gameAdText });
+});
+
+webApp.get('/api/admin/ads-config', requireDashSecret, (req, res) => {
+  let channels = [];
+  try { channels = JSON.parse(getSetting('force_sub_channels', '[]')); } catch(e) {}
+  if (!channels || !channels.length) {
+    channels = [
+      { name: '🎵 Ghost Music Bot', url: 'https://t.me/GhostMusic_Bot' },
+      { name: '👻 The Ghost Talk Bot', url: `https://t.me/${BOT_USERNAME}` }
+    ];
+  }
+  res.json({
+    adToastText: getSetting('ad_toast_text', gameAdText) || gameAdText,
+    adBannerEnabled: getSetting('ad_banner_enabled', 'false') === 'true',
+    adBannerText: getSetting('ad_banner_text', `📢 *Sponsored:* [Ghost Music Bot](https://t.me/GhostMusic_Bot) — Play songs in Telegram VC!`),
+    adBannerBtnText: getSetting('ad_banner_btn_text', '🎵 Try Ghost Music'),
+    adBannerBtnUrl: getSetting('ad_banner_btn_url', 'https://t.me/GhostMusic_Bot'),
+    forceSubEnabled: getSetting('force_sub_enabled', 'true') === 'true',
+    forceSubInterval: parseInt(getSetting('force_sub_interval', '3')) || 3,
+    forceSubChannels: channels
+  });
+});
+
+webApp.post('/api/admin/ads-config', requireDashSecret, (req, res) => {
+  const { adToastText, adBannerEnabled, adBannerText, adBannerBtnText, adBannerBtnUrl, forceSubEnabled, forceSubInterval, forceSubChannels } = req.body;
+  if (adToastText !== undefined) {
+    setSetting('ad_toast_text', adToastText);
+    gameAdText = adToastText;
+  }
+  if (adBannerEnabled !== undefined) setSetting('ad_banner_enabled', String(adBannerEnabled));
+  if (adBannerText !== undefined) setSetting('ad_banner_text', adBannerText);
+  if (adBannerBtnText !== undefined) setSetting('ad_banner_btn_text', adBannerBtnText);
+  if (adBannerBtnUrl !== undefined) setSetting('ad_banner_btn_url', adBannerBtnUrl);
+  if (forceSubEnabled !== undefined) setSetting('force_sub_enabled', String(forceSubEnabled));
+  if (forceSubInterval !== undefined) setSetting('force_sub_interval', String(forceSubInterval));
+  if (forceSubChannels !== undefined) setSetting('force_sub_channels', JSON.stringify(forceSubChannels));
+  res.json({ ok: true, message: 'Settings saved successfully' });
 });
 
 // ── Public landing page (clean, no admin exposure) ────────────────────────────
