@@ -172,6 +172,14 @@ async function initDB() {
     value TEXT
   )`);
 
+  exec(`CREATE TABLE IF NOT EXISTS bot_groups (
+    chat_id TEXT PRIMARY KEY,
+    title TEXT,
+    type TEXT,
+    added_at TEXT DEFAULT (datetime('now')),
+    last_promo TEXT DEFAULT NULL
+  )`);
+
   ['total_users','total_chats','total_messages','active_today'].forEach(k => {
     if (!db.prepare('SELECT key FROM bot_stats WHERE key=?').get(k))
       db.prepare('INSERT INTO bot_stats(key,value) VALUES(?,0)').run(k);
@@ -299,6 +307,76 @@ function isUserInChat(tg_id) {
 // ─── BOT SETUP ────────────────────────────────────────────────────────────────
 const bot = new Telegraf(BOT_TOKEN);
 bot.use(session());
+
+// Track joined groups & supergroups
+bot.use(async (ctx, next) => {
+  if (ctx.chat && (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup') && db) {
+    try {
+      db.prepare('INSERT OR REPLACE INTO bot_groups(chat_id, title, type, added_at) VALUES(?, ?, ?, COALESCE((SELECT added_at FROM bot_groups WHERE chat_id=?), datetime("now")))').run(
+        String(ctx.chat.id), ctx.chat.title || 'Telegram Group', ctx.chat.type, String(ctx.chat.id)
+      );
+    } catch(e) {}
+  }
+  return next();
+});
+
+bot.on('my_chat_member', async ctx => {
+  const chat = ctx.chat;
+  if (chat && (chat.type === 'group' || chat.type === 'supergroup') && db) {
+    const status = ctx.myChatMember?.new_chat_member?.status;
+    if (status === 'member' || status === 'administrator') {
+      try {
+        db.prepare('INSERT OR REPLACE INTO bot_groups(chat_id, title, type, added_at) VALUES(?, ?, ?, COALESCE((SELECT added_at FROM bot_groups WHERE chat_id=?), datetime("now")))').run(
+          String(chat.id), chat.title || 'Telegram Group', chat.type, String(chat.id)
+        );
+      } catch(e) {}
+    } else if (status === 'left' || status === 'kicked') {
+      try {
+        db.prepare('DELETE FROM bot_groups WHERE chat_id=?').run(String(chat.id));
+      } catch(e) {}
+    }
+  }
+});
+
+// Automated Group Promo sender helper
+async function sendGroupPromotions(force = false) {
+  if (!db) return { sent: 0, failed: 0 };
+  const enabled = getSetting('group_promo_enabled', 'false') === 'true';
+  if (!enabled && !force) return { sent: 0, failed: 0, disabled: true };
+  const msg = getSetting('group_promo_message', 'ðŸ‘» *GhostTalk â€” 1:1 Secret Anonymous Chat*\n\nMeet interesting strangers safely and anonymously!\nðŸ‘‰ Start now: @' + BOT_USERNAME);
+  const intervalMins = parseInt(getSetting('group_promo_interval_mins', '120')) || 120;
+  const cutoff = new Date(Date.now() - intervalMins * 60 * 1000).toISOString();
+
+  let groups = [];
+  try {
+    if (force) {
+      groups = db.prepare('SELECT * FROM bot_groups').all();
+    } else {
+      groups = db.prepare('SELECT * FROM bot_groups WHERE last_promo IS NULL OR last_promo < ?').all(cutoff);
+    }
+  } catch(e) { return { sent: 0, failed: 0, error: e.message }; }
+
+  let sent = 0, failed = 0;
+  for (const g of groups) {
+    try {
+      await bot.telegram.sendMessage(g.chat_id, msg, { parse_mode: 'Markdown' });
+      db.prepare('UPDATE bot_groups SET last_promo=? WHERE chat_id=?').run(new Date().toISOString(), g.chat_id);
+      sent++;
+    } catch(e) {
+      failed++;
+      if (e.message && (e.message.includes('chat not found') || e.message.includes('kicked') || e.message.includes('forbidden') || e.message.includes('bot was kicked'))) {
+        try { db.prepare('DELETE FROM bot_groups WHERE chat_id=?').run(g.chat_id); } catch(err) {}
+      }
+    }
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  return { sent, failed, total: groups.length };
+}
+
+// Background scheduler for group promotions (checks every minute)
+setInterval(() => {
+  sendGroupPromotions(false).catch(() => {});
+}, 60 * 1000);
 
 // ─── AD / ANNOUNCEMENT BANNER ────────────────────────────────────────────────
 let gameAdText = process.env.GAME_AD_TEXT || '🎮 Loading next question...';
@@ -2051,61 +2129,88 @@ webApp.get('/ghosttalk_intro.jpg', (req, res) => {
   else res.status(404).send('Not found');
 });
 
-webApp.get('/api/stats', (req, res) => {
-  res.json({
-    total_users:    getTotalUsers(),
-    total_chats:    getTotalChats(),
-    total_messages: getTotalMsgs(),
-    active_today:   getActiveToday(),
-    active_now:     activeChats.size,
-    searching_now:  Object.values(waitingPool).reduce((a,b) => a+b.length, 0),
-  });
-});
-
-// ── ADMIN PROTECTED ROUTES ────────────────────────────────────────────────────
-webApp.get('/api/admin/stats', requireDashSecret, (req, res) => {
+function getFullStatsData() {
+  const tu = getTotalUsers();
+  const tc = getTotalChats();
+  const tm = getTotalMsgs();
+  const an = activeChats.size;
+  const sn = Object.values(waitingPool).reduce((a,b) => a+b.length, 0);
   const bannedCount  = db.prepare('SELECT COUNT(*) as c FROM users WHERE banned=1').get()?.c || 0;
   const openComps    = db.prepare('SELECT COUNT(*) as c FROM complaints WHERE resolved=0').get()?.c || 0;
   const premiumUsers = db.prepare('SELECT COUNT(*) as c FROM users WHERE vip_tier>0').get()?.c || 0;
   const totalStars   = db.prepare("SELECT COALESCE(SUM(stars),0) as s FROM payments WHERE status='completed'").get()?.s || 0;
   const pendingPay   = db.prepare("SELECT COUNT(*) as c FROM payments WHERE status='pending'").get()?.c || 0;
+  const lb = db.prepare(`SELECT anon_id,tg_id,gender,language,chat_count,streak_days,total_messages,CASE WHEN rating_count>0 THEN ROUND(CAST(rating_sum AS FLOAT)/rating_count,1) ELSE 0 END as avg_rating FROM users ORDER BY chat_count DESC LIMIT 20`).all();
+  let groupsCount = 0;
+  try { groupsCount = db.prepare('SELECT COUNT(*) as c FROM bot_groups').get()?.c || 0; } catch(e) {}
 
-  res.json({
-    total_users:    getTotalUsers(),
-    total_chats:    getTotalChats(),
-    total_messages: getTotalMsgs(),
-    active_today:   getActiveToday(),
-    active_now:     activeChats.size,
-    searching_now:  Object.values(waitingPool).reduce((a,b) => a+b.length, 0),
-    banned_users:   bannedCount,
-    open_complaints:openComps,
-    premium_users:  premiumUsers,
-    total_stars:    totalStars,
+  return {
+    total_users:      tu,
+    total_chats:      tc,
+    total_messages:   tm,
+    active_now:       an,
+    active_chats:     an,
+    searching_now:    sn,
+    searching:        sn,
+    active_today:     getActiveToday(),
+    banned_users:     bannedCount,
+    open_complaints:  openComps,
+    premium_users:    premiumUsers,
+    total_stars:      totalStars,
     pending_payments: pendingPay,
-    leaderboard:    db.prepare(`SELECT anon_id,chat_count,streak_days,total_messages,CASE WHEN rating_count>0 THEN ROUND(CAST(rating_sum AS FLOAT)/rating_count,1) ELSE 0 END as avg_rating FROM users ORDER BY chat_count DESC LIMIT 10`).all(),
-  });
+    groups_count:     groupsCount,
+    leaderboard:      lb,
+    stats: [
+      { key: 'total_users', value: tu },
+      { key: 'total_chats', value: tc },
+      { key: 'total_messages', value: tm },
+      { key: 'active_chats', value: an },
+      { key: 'searching', value: sn }
+    ]
+  };
+}
+
+// Stats endpoints (compatible with both public stats and admin dashboard)
+webApp.get(['/api/stats', '/api/admin/stats'], (req, res) => {
+  res.json(getFullStatsData());
 });
 
-webApp.get('/api/admin/complaints', requireDashSecret, (req, res) => {
-  res.json(db.prepare('SELECT * FROM complaints WHERE resolved=0 ORDER BY timestamp DESC LIMIT 30').all());
+// Users listing endpoint (with TG Chat ID for dashboard)
+webApp.get(['/api/users', '/api/admin/users'], (req, res) => {
+  try {
+    const rows = db.prepare(`SELECT anon_id, tg_id, gender, language, mood, chat_count, total_messages, streak_days, vip_tier, banned, ban_reason, created_at,
+      CASE WHEN rating_count>0 THEN ROUND(CAST(rating_sum AS FLOAT)/rating_count,1) ELSE 0 END as avg_rating
+      FROM users ORDER BY (tg_id IS NOT NULL) DESC, chat_count DESC, created_at DESC LIMIT 100`).all();
+    res.json({ ok: true, users: rows });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
-webApp.post('/api/admin/resolve-complaint/:id', requireDashSecret, (req, res) => {
+// Complaints endpoints
+webApp.get(['/api/complaints', '/api/admin/complaints'], (req, res) => {
+  res.json(db.prepare('SELECT * FROM complaints WHERE resolved=0 ORDER BY timestamp DESC LIMIT 50').all());
+});
+
+webApp.post(['/api/complaints/:id/resolve', '/api/admin/resolve-complaint/:id'], (req, res) => {
   db.prepare('UPDATE complaints SET resolved=1 WHERE id=?').run(parseInt(req.params.id));
   res.json({ ok:true });
 });
 
-webApp.post('/api/admin/ban', requireDashSecret, (req, res) => {
-  const { anon_id, reason } = req.body;
-  if (!anon_id) return res.status(400).json({ error:'anon_id required' });
-  db.prepare('UPDATE users SET banned=1,ban_reason=? WHERE anon_id=?').run(reason||'Admin action', anon_id);
+// Ban & Unban endpoints
+webApp.post(['/api/ban', '/api/admin/ban'], (req, res) => {
+  const { anon_id, tg_id, reason } = req.body;
+  if (!anon_id && !tg_id) return res.status(400).json({ error:'anon_id or tg_id required' });
+  if (anon_id) db.prepare('UPDATE users SET banned=1,ban_reason=? WHERE anon_id=?').run(reason||'Admin action', anon_id);
+  if (tg_id) db.prepare('UPDATE users SET banned=1,ban_reason=? WHERE tg_id=?').run(reason||'Admin action', tg_id);
   res.json({ ok:true });
 });
 
-webApp.post('/api/admin/unban', requireDashSecret, (req, res) => {
-  const { anon_id } = req.body;
-  if (!anon_id) return res.status(400).json({ error:'anon_id required' });
-  db.prepare('UPDATE users SET banned=0,ban_reason=NULL WHERE anon_id=?').run(anon_id);
+webApp.post(['/api/unban', '/api/admin/unban'], (req, res) => {
+  const { anon_id, tg_id } = req.body;
+  if (!anon_id && !tg_id) return res.status(400).json({ error:'anon_id or tg_id required' });
+  if (anon_id) db.prepare('UPDATE users SET banned=0,ban_reason=NULL WHERE anon_id=?').run(anon_id);
+  if (tg_id) db.prepare('UPDATE users SET banned=0,ban_reason=NULL WHERE tg_id=?').run(tg_id);
   res.json({ ok:true });
 });
 
@@ -2114,16 +2219,11 @@ webApp.get('/api/admin/payments', requireDashSecret, (req, res) => {
 });
 
 // ── Managed Bots API (admin) ──────────────────────────────────────────────────
-webApp.get('/api/bots', (req, res) => {
-  // Public: only active bots
-  res.json(db.prepare('SELECT id,name,username,description,features,category,link,icon FROM managed_bots WHERE active=1 ORDER BY sort_order ASC, added_at DESC').all());
-});
-
-webApp.get('/api/admin/bots', requireDashSecret, (req, res) => {
+webApp.get(['/api/bots', '/api/admin/bots'], (req, res) => {
   res.json(db.prepare('SELECT * FROM managed_bots ORDER BY sort_order ASC, added_at DESC').all());
 });
 
-webApp.post('/api/admin/bots', requireDashSecret, (req, res) => {
+webApp.post(['/api/bots', '/api/admin/bots'], (req, res) => {
   const { name, username, description, features, category, link, icon } = req.body;
   if (!name || !username || !link) return res.status(400).json({ error:'name, username and link required' });
   db.prepare('INSERT INTO managed_bots(name,username,description,features,category,link,icon,active) VALUES(?,?,?,?,?,?,?,1)')
@@ -2131,7 +2231,7 @@ webApp.post('/api/admin/bots', requireDashSecret, (req, res) => {
   res.json({ ok:true });
 });
 
-webApp.put('/api/admin/bots/:id', requireDashSecret, (req, res) => {
+webApp.put(['/api/bots/:id', '/api/admin/bots/:id'], (req, res) => {
   const { name, username, description, features, category, link, icon, active, sort_order } = req.body;
   const id = parseInt(req.params.id);
   const b  = db.prepare('SELECT * FROM managed_bots WHERE id=?').get(id);
@@ -2141,12 +2241,13 @@ webApp.put('/api/admin/bots/:id', requireDashSecret, (req, res) => {
   res.json({ ok:true });
 });
 
-webApp.delete('/api/admin/bots/:id', requireDashSecret, (req, res) => {
+webApp.delete(['/api/bots/:id', '/api/admin/bots/:id'], (req, res) => {
   db.prepare('DELETE FROM managed_bots WHERE id=?').run(parseInt(req.params.id));
   res.json({ ok:true });
 });
 
-webApp.post('/api/admin/broadcast', requireDashSecret, async (req, res) => {
+// Broadcast endpoint
+webApp.post(['/api/broadcast', '/api/admin/broadcast'], async (req, res) => {
   const { message } = req.body;
   if (!message) return res.status(400).json({ error:'message required' });
   const users = db.prepare('SELECT tg_id FROM users WHERE tg_id IS NOT NULL AND banned=0').all();
@@ -2156,7 +2257,33 @@ webApp.post('/api/admin/broadcast', requireDashSecret, async (req, res) => {
     catch(e) { failed++; }
     await new Promise(r => setTimeout(r, 50));
   }
-  res.json({ sent, failed });
+  res.json({ ok:true, sent, failed, total: users.length });
+});
+
+// ── Automated Group Promotion API ─────────────────────────────────────────────
+webApp.get(['/api/group-promo', '/api/admin/group-promo'], (req, res) => {
+  let groups = [];
+  try { groups = db.prepare('SELECT * FROM bot_groups ORDER BY added_at DESC').all(); } catch(e) {}
+  res.json({
+    enabled: getSetting('group_promo_enabled', 'false') === 'true',
+    message: getSetting('group_promo_message', '👻 *GhostTalk — 1:1 Secret Anonymous Chat*\n\nMeet interesting strangers safely and anonymously!\n👉 Start now: @' + BOT_USERNAME),
+    interval_mins: parseInt(getSetting('group_promo_interval_mins', '120')) || 120,
+    groups_count: groups.length,
+    groups: groups
+  });
+});
+
+webApp.post(['/api/group-promo', '/api/admin/group-promo'], (req, res) => {
+  const { enabled, message, interval_mins } = req.body;
+  if (enabled !== undefined) setSetting('group_promo_enabled', String(enabled));
+  if (message !== undefined) setSetting('group_promo_message', message);
+  if (interval_mins !== undefined) setSetting('group_promo_interval_mins', String(interval_mins));
+  res.json({ ok: true, message: 'Group promo settings updated successfully' });
+});
+
+webApp.post(['/api/group-promo/send-now', '/api/admin/group-promo/send-now'], async (req, res) => {
+  const result = await sendGroupPromotions(true);
+  res.json({ ok: true, ...result });
 });
 
 webApp.get('/api/admin/ad', requireDashSecret, (req, res) => {
