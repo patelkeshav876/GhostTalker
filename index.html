@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
@@ -1051,7 +1051,7 @@ footer {
       <!-- OVERVIEW -->
       <div class="dash-panel active" id="dp-overview">
         <div class="dash-panel-title">Dashboard</div>
-        <div class="dash-panel-sub"><span class="live-dot"></span> Live data · <span id="last-refresh">Loading...</span> <button onclick="loadStats()" style="color:var(--blue);font-size:12px;font-weight:600;padding:3px 8px;border-radius:6px;background:var(--blue-pale)">↻ Refresh</button></div>
+        <div class="dash-panel-sub"><span class="live-dot"></span> Live data · <span id="last-refresh">Loading...</span> <button onclick="loadStats()" style="color:var(--blue);font-size:12px;font-weight:600;padding:3px 8px;border-radius:6px;background:var(--blue-pale)">Refresh</button></div>
         <div class="metrics-grid">
           <div class="metric-card"><div class="metric-val" id="mv-users">—</div><div class="metric-label">Total Users</div><div class="metric-change ch-up">↑ Growing</div></div>
           <div class="metric-card"><div class="metric-val" id="mv-chats">—</div><div class="metric-label">Total Chats</div><div class="metric-change ch-up">↑ All time</div></div>
@@ -1084,7 +1084,7 @@ footer {
       <!-- LIVE -->
       <div class="dash-panel" id="dp-live">
         <div class="dash-panel-title">Live</div>
-        <div class="dash-panel-sub"><span class="live-dot"></span> Real-time activity <button onclick="loadStats()" style="color:var(--blue);font-size:12px;font-weight:600;padding:3px 8px;border-radius:6px;background:var(--blue-pale)">↻ Refresh</button></div>
+        <div class="dash-panel-sub"><span class="live-dot"></span> Real-time activity <button onclick="loadStats()" style="color:var(--blue);font-size:12px;font-weight:600;padding:3px 8px;border-radius:6px;background:var(--blue-pale)">Refresh</button></div>
         <div class="metrics-grid">
           <div class="metric-card"><div class="metric-val" id="lv-active">—</div><div class="metric-label">Active Chats</div></div>
           <div class="metric-card"><div class="metric-val" id="lv-search">—</div><div class="metric-label">Searching</div></div>
@@ -1106,7 +1106,7 @@ footer {
           <div id="ban-msg" style="margin-top:10px;font-size:13px"></div>
         </div>
         <div class="dash-card">
-          <div class="dash-card-title">All Users <button onclick="loadUsers()" style="color:var(--blue);font-size:12px;font-weight:600;padding:3px 8px;border-radius:6px;background:var(--blue-pale);margin-left:8px">â†» Refresh</button></div>
+          <div class="dash-card-title">All Users <button onclick="loadUsers()" style="color:var(--blue);font-size:12px;font-weight:600;padding:3px 8px;border-radius:6px;background:var(--blue-pale);margin-left:8px">Refresh</button></div>
           <div style="overflow-x:auto">
             <table class="dash-table">
               <thead><tr><th>TG Chat ID</th><th>Anon ID</th><th>Gender</th><th>Lang</th><th>Chats</th><th>Msgs</th><th>Streak</th><th>Rating</th><th>Status</th><th>Action</th></tr></thead>
@@ -1149,7 +1149,7 @@ footer {
       <!-- BOTS -->
       <div class="dash-panel" id="dp-bots">
         <div class="dash-panel-title">Bot Control & Showcase (/bots)</div>
-        <div class="dash-panel-sub">Manage all official bots displayed in the Telegram bot's /bots section and landing page <button onclick="loadManagedBots()" style="color:var(--blue);font-size:12px;font-weight:600;padding:3px 8px;border-radius:6px;background:var(--blue-pale);margin-left:8px">↻ Refresh</button></div>
+        <div class="dash-panel-sub">Manage all official bots displayed in the Telegram bot's /bots section and landing page <button onclick="loadManagedBots()" style="color:var(--blue);font-size:12px;font-weight:600;padding:3px 8px;border-radius:6px;background:var(--blue-pale);margin-left:8px">Refresh</button></div>
 
         <!-- Add Bot Card -->
         <div class="dash-card" style="margin-bottom:20px">
@@ -1187,7 +1187,7 @@ footer {
       <!-- ADS & SPONSORS -->
       <div class="dash-panel" id="dp-ads">
         <div class="dash-panel-title">📢 Ads & Sponsor Channels Control</div>
-        <div class="dash-panel-sub">Control game popup toasts, in-chat ad banners, and mandatory sponsor subscription walls in real-time. <button onclick="loadAdsConfig()" style="color:var(--blue);font-size:12px;font-weight:600;padding:3px 8px;border-radius:6px;background:var(--blue-pale);margin-left:8px">↻ Refresh</button></div>
+        <div class="dash-panel-sub">Control game popup toasts, in-chat ad banners, and mandatory sponsor subscription walls in real-time. <button onclick="loadAdsConfig()" style="color:var(--blue);font-size:12px;font-weight:600;padding:3px 8px;border-radius:6px;background:var(--blue-pale);margin-left:8px">Refresh</button></div>
 
         <!-- Card 1: Toast Ad -->
         <div class="dash-card" style="margin-bottom:16px">
@@ -1250,7 +1250,7 @@ footer {
       <!-- GROUP PROMO -->
       <div class="dash-panel" id="dp-group-promo">
         <div class="dash-panel-title">Automated Group Promotion</div>
-        <div class="dash-panel-sub">Automatically promote GhostTalk across all Telegram groups where the bot is added <button onclick="loadGroupPromo()" style="color:var(--blue);font-size:12px;font-weight:600;padding:3px 8px;border-radius:6px;background:var(--blue-pale);margin-left:8px">â†» Refresh</button></div>
+        <div class="dash-panel-sub">Automatically promote GhostTalk across all Telegram groups where the bot is added <button onclick="loadGroupPromo()" style="color:var(--blue);font-size:12px;font-weight:600;padding:3px 8px;border-radius:6px;background:var(--blue-pale);margin-left:8px">Refresh</button></div>
         
         <div class="dash-card" style="margin-bottom:16px">
           <div class="dash-card-title">Promotion Automation Settings</div>
@@ -1282,8 +1282,8 @@ footer {
           </div>
 
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">
-            <button class="btn-blue" onclick="saveGroupPromo()">ðŸ’¾ Save Settings</button>
-            <button class="btn-ghost-sm" onclick="sendGroupPromoNow()" style="background:var(--blue-pale);color:var(--blue);border:none">ðŸš€ Send Promo to All Groups Now</button>
+            <button class="btn-blue" onclick="saveGroupPromo()">Save Settings</button>
+            <button class="btn-ghost-sm" onclick="sendGroupPromoNow()" style="background:var(--blue-pale);color:var(--blue);border:none">Send Promo to All Groups Now</button>
           </div>
           <div id="gp-status-msg" style="margin-top:10px;font-size:13px"></div>
         </div>
@@ -1574,6 +1574,10 @@ async function loadUsers() {
   if (usEl) usEl.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--ink-50)">Loading users...</td></tr>`;
   try {
     const res = await fetch(url + '/api/users', { headers: getAdminHeaders() });
+    if (!res.ok) {
+      if (res.status === 404) throw new Error('Backend update pending on Render. Click "Manual Deploy" -> "Deploy latest commit" in Render.');
+      throw new Error(`Server returned HTTP ${res.status}`);
+    }
     const data = await res.json();
     const users = data.users || [];
     if (!users.length) {
@@ -1647,6 +1651,10 @@ async function loadComplaints() {
   if (tbody) tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--ink-50)">Loading complaints...</td></tr>`;
   try {
     const res = await fetch(url + '/api/complaints', { headers: getAdminHeaders() });
+    if (!res.ok) {
+      if (res.status === 404) throw new Error('Backend update pending on Render.');
+      throw new Error(`Server returned HTTP ${res.status}`);
+    }
     const rows = await res.json();
     if (!rows || !rows.length) {
       if (tbody) tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--ink-50)">No open complaints 🎉</td></tr>`;
@@ -1734,6 +1742,10 @@ async function sendBc() {
       headers: getAdminHeaders(),
       body: JSON.stringify({ message: msg })
     });
+    if (!res.ok) {
+      if (res.status === 404) throw new Error('Backend update pending on Render. Click "Manual Deploy" -> "Deploy latest commit" in Render.');
+      throw new Error(`Server returned HTTP ${res.status}`);
+    }
     const result = await res.json();
     const h = document.getElementById('bc-history');
     if (h) {
@@ -1753,6 +1765,10 @@ async function loadGroupPromo() {
   const msgEl = document.getElementById('gp-status-msg');
   try {
     const res = await fetch(url + '/api/group-promo', { headers: getAdminHeaders() });
+    if (!res.ok) {
+      if (res.status === 404) throw new Error('Backend update pending on Render. Click "Manual Deploy" -> "Deploy latest commit" in Render.');
+      throw new Error(`Server returned HTTP ${res.status}`);
+    }
     const data = await res.json();
     const enEl = document.getElementById('gp-enabled');
     const intEl = document.getElementById('gp-interval');

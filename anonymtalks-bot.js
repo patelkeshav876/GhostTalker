@@ -1,4 +1,4 @@
-/**
+﻿/**
  * anonymtalks-bot-v4.js
  * AnonymTalks — Anonymous 1:1 Chat Telegram Bot
  *
@@ -581,20 +581,26 @@ async function endChat(chatId, reason = 'ended', initiatorTg = null) {
 
     if (isPartner) {
       const partnerTxt = [
-        'Your partner has stopped the chat 😔',
-        'Type /search to find a new partner',
+        'Your partner has stopped the chat 🥺',
         '',
         `https://t.me/${BOT_USERNAME}`,
         '',
-        'If you wish, leave your feedback about your partner. It will help us find better partners for you in the future'
+        'If you wish, leave your feedback about your partner below:'
       ].join('\n');
       try {
         await bot.telegram.sendMessage(id, partnerTxt, { ...endChatFeedbackKb(partnerAnon) });
       } catch(e) {}
+      // Restore the lobby keyboard immediately
+      try {
+        await bot.telegram.sendMessage(id, 'Tap *🚀 Find a partner* below to begin a new chat:', {
+          parse_mode: 'Markdown',
+          ...lobbyKb()
+        });
+      } catch(e) {}
     } else {
       const selfTxt = [
         'You have stopped the chat 🛑',
-        'Type /search to find a new partner',
+        'Type /search or tap below to find a new partner:',
         '',
         `https://t.me/${BOT_USERNAME}`
       ].join('\n');
