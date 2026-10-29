@@ -306,6 +306,9 @@ function isUserInChat(tg_id) {
 
 // ─── BOT SETUP ────────────────────────────────────────────────────────────────
 const bot = new Telegraf(BOT_TOKEN);
+bot.catch((err, ctx) => {
+  console.error(`⚠️ Telegram error (${ctx?.updateType || 'poll'}):`, err?.message || err);
+});
 bot.use(session());
 
 // Track joined groups & supergroups
@@ -2092,15 +2095,38 @@ async function showReferral(ctx) {
   );
 }
 
-// ─── GRACEFUL SHUTDOWN ────────────────────────────────────────────────────────
+// ─── ERROR & SHUTDOWN HANDLERS ────────────────────────────────────────────────
+process.on('unhandledRejection', (reason) => {
+  console.error('⚠️ Unhandled Promise Rejection:', reason?.message || reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('⚠️ Uncaught Exception:', err?.message || err);
+});
 process.on('SIGINT', () => { console.log('⛔ Shutting down...'); if (db) db.close(); process.exit(0); });
+process.on('SIGTERM', () => { console.log('⛔ Shutting down...'); if (db) db.close(); process.exit(0); });
 
-// ─── LAUNCH ───────────────────────────────────────────────────────────────────
+// ─── LAUNCH WITH RETRY ────────────────────────────────────────────────────────
+async function launchBotWithRetry(retries = 8, delayMs = 3000) {
+  for (let i = 1; i <= retries; i++) {
+    try {
+      await bot.launch({ dropPendingUpdates: true });
+      console.log('✅ AnonymTalks v4 running and connected to Telegram!');
+      console.log(`👑 Admin IDs: ${ADMIN_IDS.join(', ')||'none'}`);
+      return;
+    } catch (err) {
+      console.error(`⚠️ Telegram launch attempt ${i}/${retries} failed (${err.code || err.message}). Retrying in ${delayMs/1000}s...`);
+      if (i === retries) {
+        console.error('❌ Could not connect to Telegram after multiple retries. Web server remains active.');
+      } else {
+        await new Promise(r => setTimeout(r, delayMs));
+      }
+    }
+  }
+}
+
 (async () => {
   await initDB();
-  await bot.launch();
-  console.log('✅ AnonymTalks v4 running!');
-  console.log(`👑 Admin IDs: ${ADMIN_IDS.join(', ')||'none'}`);
+  launchBotWithRetry().catch(e => console.error('Launch error:', e));
 })();
 
 // ═══════════════════════════════════════════════════════════════════════════════
