@@ -404,10 +404,29 @@ const inChatKb = () => Markup.keyboard([
 
 const settingsKb = () => Markup.inlineKeyboard([
   [Markup.button.callback('👤 Profile', 'menu_profile'), Markup.button.callback('🎁 Daily Bonus', 'menu_bonus')],
+  [Markup.button.callback('🎭 Change Mood', 'menu_mood'), Markup.button.callback('🏷️ Interests', 'menu_interests')],
   [Markup.button.callback('🌐 Language', 'menu_lang'), Markup.button.callback('💎 Go Premium', 'menu_premium')],
-  [Markup.button.callback('🔗 Refer & Earn', 'menu_refer'), Markup.button.callback('🤖 Our Bots', 'menu_bots')],
+  [Markup.button.callback('👥 Refer & Earn', 'menu_refer'), Markup.button.callback('🤖 Our Bots', 'menu_bots')],
   [Markup.button.callback('🔗 My Chat Link (/link)', 'menu_link')]
 ]);
+
+async function editOrReply(ctx, text, extra = {}) {
+  try {
+    if (ctx.callbackQuery?.message?.photo) {
+      return await ctx.editMessageCaption(text, extra);
+    } else if (ctx.callbackQuery) {
+      return await ctx.editMessageText(text, extra);
+    } else {
+      return await ctx.reply(text, extra);
+    }
+  } catch (err) {
+    try {
+      return await ctx.reply(text, extra);
+    } catch (e) {
+      console.error('editOrReply fallback error:', e.message);
+    }
+  }
+}
 
 const endChatFeedbackKb = (partnerAnon) => Markup.inlineKeyboard([
   [Markup.button.callback('👍', `fb_like_${partnerAnon}`), Markup.button.callback('👎', `fb_dislike_${partnerAnon}`)],
@@ -546,6 +565,12 @@ async function connectPair(a, b) {
   tgToAnon[b.tg_id] = { anon:b.anon_id, chatId, partnerAnon:a.anon_id, partnerTg:a.tg_id, startedAt:start };
   updateStreak(a.anon_id); updateStreak(b.anon_id);
 
+  // Synchronize both session states to inChat
+  const sA = sessions.get(a.tg_id);
+  if (sA) { sA.searchingSince = null; sA.inChat = true; }
+  const sB = sessions.get(b.tg_id);
+  if (sB) { sB.searchingSince = null; sB.inChat = true; }
+
   // Minimalist partner found message — keeps anonymity total so strangers have something to talk about
   try { await bot.telegram.sendMessage(a.tg_id, buildFoundMsg(a.anon_id), { protect_content:true, ...inChatKb() }); } catch(e) {}
   try { await bot.telegram.sendMessage(b.tg_id, buildFoundMsg(b.anon_id), { protect_content:true, ...inChatKb() }); } catch(e) {}
@@ -579,6 +604,8 @@ async function endChat(chatId, reason = 'ended', initiatorTg = null) {
 
   for (const id of [chat.a_tg, chat.b_tg]) {
     delete tgToAnon[id];
+    const s = sessions.get(id);
+    if (s) { s.inChat = false; s.searchingSince = null; }
     const isPartner = initiatorTg && id !== initiatorTg;
     const partnerAnon = (id === chat.a_tg) ? chat.b_anon : chat.a_anon;
 
@@ -1469,9 +1496,15 @@ async function claimBonus(ctx) {
 }
 
 async function showSettings(ctx) {
+  const s = ensureSession(ctx);
+  const u = getUser(s.anon_id, ctx.from?.id);
   await ctx.reply(
-    `⚙️ *Settings & Account*\n\n` +
-    `Select an option below to manage your profile, bonus, language, or personal link:`,
+    `⚙️ *Settings & Preferences*\n\n` +
+    `👤 *Gender:* ${u.gender || 'Not set'}\n` +
+    `🌐 *Language:* ${u.language || 'English'}\n` +
+    `🎭 *Mood:* ${u.mood || 'Not set'}\n` +
+    `🏷️ *Interests:* ${u.interests || 'None'}\n\n` +
+    `Select an option below to update your profile:`,
     {
       parse_mode: 'Markdown',
       ...settingsKb()
@@ -1492,12 +1525,31 @@ async function showMyLink(ctx) {
 }
 
 async function showInterestPicker(ctx) {
-  await ctx.reply(
-    `🔒 *Match by Interest is Locked!*\n\n` +
-    `This smart matching feature will automatically unlock after our community reaches *100,000 active users* (to ensure instant matches without queue waiting delays)!\n\n` +
-    `_In the meantime, enjoy instant matching with 🚀 Find a partner!_`,
-    { parse_mode: 'Markdown', ...lobbyKb() }
+  const s = ensureSession(ctx);
+  const u = getUser(s.anon_id, ctx.from?.id);
+  const userInterests = (u.interests || '').split(',').map(x => x.trim()).filter(Boolean);
+
+  const btns = INTEREST_TAGS.map(tag => {
+    const isSelected = userInterests.includes(tag);
+    return Markup.button.callback(
+      isSelected ? `✅ ${tag}` : tag,
+      `toggle_interest_${tag}`
+    );
+  });
+  const rows = [];
+  for (let i = 0; i < btns.length; i += 2) rows.push(btns.slice(i, i + 2));
+  rows.push([
+    Markup.button.callback('🗑 Clear All', 'clear_interests'),
+    Markup.button.callback('💾 Save & Done', 'save_interests_done')
+  ]);
+
+  const text = (
+    `🏷️ *Manage Your Interests*\n\n` +
+    `Current: ${userInterests.length ? userInterests.join(', ') : '_None selected yet._'}\n\n` +
+    `Tap any interest below to toggle it on/off for better matching:`
   );
+  const extra = { parse_mode: 'Markdown', ...Markup.inlineKeyboard(rows) };
+  await editOrReply(ctx, text, extra);
 }
 
 bot.command('stop', async ctx => {
@@ -1607,15 +1659,13 @@ bot.hears(['⏭ Next Chat', '/next'], async ctx => {
 
 bot.hears(['🛑 Stop Chat', '🛑 End Chat', '/stop'], async ctx => {
   const s = ensureSession(ctx);
-  s.inChat = false;
-  if (s.searchingSince) {
-    removeFromPools(s.anon_id);
-    s.searchingSince = null;
-    return ctx.reply('🛑 Search cancelled.', lobbyKb());
-  }
+  s.searchingSince = null;
+  removeFromPools(s.anon_id);
   if (isUserInChat(ctx.from.id)) {
+    s.inChat = false;
     await endChatForUser(s.anon_id, 'user_stop', ctx.from.id);
   } else {
+    s.inChat = false;
     await ctx.reply("🏠 You're in the lobby.", lobbyKb());
   }
 });
@@ -1652,13 +1702,13 @@ bot.hears(['⭐ Rate Partner'], async ctx => {
 
 bot.hears('❌ Cancel Search', async ctx => {
   const s = ensureSession(ctx);
+  if (isUserInChat(ctx.from.id)) {
+    return ctx.reply('💬 You are currently in an active chat! Use the buttons below:', inChatKb());
+  }
   if (s.searchingSince) {
     removeFromPools(s.anon_id);
     s.searchingSince = null;
     return ctx.reply('🛑 Search cancelled.', lobbyKb());
-  }
-  if (isUserInChat(ctx.from.id)) {
-    return ctx.reply('💬 You are currently in an active chat! Use the buttons below:', inChatKb());
   }
   return ctx.reply('Not searching.', lobbyKb());
 });
@@ -1706,40 +1756,40 @@ bot.action(/ob_g_(.+)/, async ctx => {
   const g = ctx.match[1] === 'skip' ? 'unspecified' : ctx.match[1];
   const tg_id = ctx.from?.id || null;
   db.prepare('UPDATE users SET gender=? WHERE anon_id=? OR (tg_id=? AND tg_id IS NOT NULL)').run(g, s.anon_id, tg_id);
-  await ctx.editMessageText(
-    `✅ Gender saved!\n\n*Step 2 of 4: Preferred Language*`,
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('🎲 Random / Any', 'ob_l_Random'), Markup.button.callback('English', 'ob_l_English')],
-        [Markup.button.callback('Hindi (हिंदी)', 'ob_l_Hindi'), Markup.button.callback('Indonesian (Bahasa)', 'ob_l_Indonesian')],
-        [Markup.button.callback('Iranian (فارسی)', 'ob_l_Iranian'), Markup.button.callback('Spanish (Español)', 'ob_l_Spanish')],
-        [Markup.button.callback('Arabic (العربية)', 'ob_l_Arabic'), Markup.button.callback('Russian (Русский)', 'ob_l_Russian')],
-        [Markup.button.callback('French (Français)', 'ob_l_French'), Markup.button.callback('⏩ Skip', 'ob_l_skip')]
-      ])
-    }
-  );
+  
+  const text = `✅ Gender saved!\n\n*Step 2 of 4: Preferred Language*`;
+  const extra = {
+    parse_mode: 'Markdown',
+    ...Markup.inlineKeyboard([
+      [Markup.button.callback('🎲 Random / Any', 'ob_l_Random'), Markup.button.callback('English', 'ob_l_English')],
+      [Markup.button.callback('Hindi (हिंदी)', 'ob_l_Hindi'), Markup.button.callback('Indonesian (Bahasa)', 'ob_l_Indonesian')],
+      [Markup.button.callback('Iranian (فارسی)', 'ob_l_Iranian'), Markup.button.callback('Spanish (Español)', 'ob_l_Spanish')],
+      [Markup.button.callback('Arabic (العربية)', 'ob_l_Arabic'), Markup.button.callback('Russian (Русский)', 'ob_l_Russian')],
+      [Markup.button.callback('French (Français)', 'ob_l_French'), Markup.button.callback('⏩ Skip', 'ob_l_skip')]
+    ])
+  };
+  await editOrReply(ctx, text, extra);
 });
 
 bot.action(/ob_l_(.+)/, async ctx => {
   await ctx.answerCbQuery();
   const s = ensureSession(ctx);
   const l = ctx.match[1];
+  const tg_id = ctx.from?.id || null;
   if (l !== 'skip') {
-    db.prepare('UPDATE users SET language=? WHERE anon_id=?').run(l, s.anon_id);
+    db.prepare('UPDATE users SET language=? WHERE anon_id=? OR (tg_id=? AND tg_id IS NOT NULL)').run(l, s.anon_id, tg_id);
   }
-  await ctx.editMessageText(
-    `✅ Language saved!\n\n*Step 3 of 4: What's your vibe today? (Mood)*`,
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('😊 Happy', 'ob_m_Happy'), Markup.button.callback('🔥 Flirty', 'ob_m_Flirty')],
-        [Markup.button.callback('😂 Funny', 'ob_m_Funny'), Markup.button.callback('😴 Chill', 'ob_m_Chill')],
-        [Markup.button.callback('🤔 Deep / Philosophical', 'ob_m_Philosophical')],
-        [Markup.button.callback('✍️ Type Custom Mood', 'ob_m_custom'), Markup.button.callback('⏩ Skip', 'ob_m_skip')]
-      ])
-    }
-  );
+  const text = `✅ Language saved!\n\n*Step 3 of 4: What's your vibe today? (Mood)*`;
+  const extra = {
+    parse_mode: 'Markdown',
+    ...Markup.inlineKeyboard([
+      [Markup.button.callback('😊 Happy', 'ob_m_Happy'), Markup.button.callback('🔥 Flirty', 'ob_m_Flirty')],
+      [Markup.button.callback('😂 Funny', 'ob_m_Funny'), Markup.button.callback('😴 Chill', 'ob_m_Chill')],
+      [Markup.button.callback('🤔 Deep / Philosophical', 'ob_m_Philosophical')],
+      [Markup.button.callback('✍️ Type Custom Mood', 'ob_m_custom'), Markup.button.callback('⏩ Skip', 'ob_m_skip')]
+    ])
+  };
+  await editOrReply(ctx, text, extra);
 });
 
 bot.action('ob_m_custom', async ctx => {
@@ -1754,8 +1804,9 @@ bot.action(/ob_m_(.+)/, async ctx => {
   const s = ensureSession(ctx);
   const m = ctx.match[1];
   if (m === 'custom') return;
+  const tg_id = ctx.from?.id || null;
   if (m !== 'skip') {
-    db.prepare('UPDATE users SET mood=? WHERE anon_id=?').run(m, s.anon_id);
+    db.prepare('UPDATE users SET mood=? WHERE anon_id=? OR (tg_id=? AND tg_id IS NOT NULL)').run(m, s.anon_id, tg_id);
   }
   const tags = INTEREST_TAGS.slice(0, 8);
   const rows = [];
@@ -1767,13 +1818,12 @@ bot.action(/ob_m_(.+)/, async ctx => {
   }
   rows.push([Markup.button.callback('✅ Complete Setup', 'ob_done')]);
 
-  await ctx.editMessageText(
-    `✅ Mood saved!\n\n*Step 4 of 4: Tap any interests you like (or Complete Setup):*`,
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard(rows)
-    }
-  );
+  const text = `✅ Mood saved!\n\n*Step 4 of 4: Tap any interests you like (or Complete Setup):*`;
+  const extra = {
+    parse_mode: 'Markdown',
+    ...Markup.inlineKeyboard(rows)
+  };
+  await editOrReply(ctx, text, extra);
 });
 
 bot.action(/ob_i_(.+)/, async ctx => {
@@ -1808,13 +1858,55 @@ bot.action('ob_done', async ctx => {
 });
 
 // Settings menu callbacks
-bot.action('menu_profile', async ctx => { await ctx.answerCbQuery(); await showProfile(ctx); });
-bot.action('menu_bonus',   async ctx => { await ctx.answerCbQuery(); await claimBonus(ctx); });
-bot.action('menu_lang',    async ctx => { await ctx.answerCbQuery(); await showLanguagePicker(ctx); });
-bot.action('menu_premium', async ctx => { await ctx.answerCbQuery(); await showPremiumPage(ctx); });
-bot.action('menu_refer',   async ctx => { await ctx.answerCbQuery(); await showReferral(ctx); });
-bot.action('menu_bots',    async ctx => { await ctx.answerCbQuery(); await showOurBots(ctx); });
-bot.action('menu_link',    async ctx => { await ctx.answerCbQuery(); await showMyLink(ctx); });
+bot.action('menu_profile',   async ctx => { await ctx.answerCbQuery(); await showProfile(ctx); });
+bot.action('menu_bonus',     async ctx => { await ctx.answerCbQuery(); await claimBonus(ctx); });
+bot.action('menu_mood',      async ctx => { await ctx.answerCbQuery(); await showMoodPicker(ctx); });
+bot.action('menu_interests', async ctx => { await ctx.answerCbQuery(); await showInterestPicker(ctx); });
+bot.action('menu_lang',      async ctx => { await ctx.answerCbQuery(); await showLanguagePicker(ctx); });
+bot.action('menu_premium',   async ctx => { await ctx.answerCbQuery(); await showPremiumPage(ctx); });
+bot.action('menu_refer',     async ctx => { await ctx.answerCbQuery(); await showReferral(ctx); });
+bot.action('menu_bots',      async ctx => { await ctx.answerCbQuery(); await showOurBots(ctx); });
+bot.action('menu_link',      async ctx => { await ctx.answerCbQuery(); await showMyLink(ctx); });
+
+// Interest toggling callbacks
+bot.action(/toggle_interest_(.+)/, async ctx => {
+  const s = ensureSession(ctx);
+  const tag = ctx.match[1];
+  const u = getUser(s.anon_id, ctx.from?.id);
+  let cur = (u.interests || '').split(',').map(x => x.trim()).filter(Boolean);
+  const tg_id = ctx.from?.id || null;
+
+  if (cur.includes(tag)) {
+    cur = cur.filter(x => x !== tag);
+    await ctx.answerCbQuery(`Removed ${tag}`);
+  } else {
+    cur.push(tag);
+    await ctx.answerCbQuery(`Added ${tag}!`);
+  }
+
+  const updatedStr = cur.join(',');
+  db.prepare('UPDATE users SET interests=? WHERE anon_id=? OR (tg_id=? AND tg_id IS NOT NULL)').run(updatedStr, s.anon_id, tg_id);
+  await showInterestPicker(ctx);
+});
+
+bot.action('clear_interests', async ctx => {
+  await ctx.answerCbQuery('Interests cleared!');
+  const s = ensureSession(ctx);
+  const tg_id = ctx.from?.id || null;
+  db.prepare('UPDATE users SET interests=NULL WHERE anon_id=? OR (tg_id=? AND tg_id IS NOT NULL)').run(s.anon_id, tg_id);
+  await showInterestPicker(ctx);
+});
+
+bot.action('save_interests_done', async ctx => {
+  await ctx.answerCbQuery('Saved!');
+  const s = ensureSession(ctx);
+  const u = getUser(s.anon_id, ctx.from?.id);
+  const cur = u.interests ? u.interests.split(',').filter(Boolean).join(', ') : 'None';
+  await editOrReply(ctx, `✅ *Interests saved!*\n\nYour interests: ${cur}\n\nTap *🚀 Find a partner* to match with someone with similar vibe!`, {
+    parse_mode: 'Markdown',
+    ...lobbyKb()
+  });
+});
 
 // End chat feedback & report callbacks
 bot.action(/fb_like_(.+)/, async ctx => {
