@@ -15,6 +15,7 @@ require('dotenv').config();
 
 const { Telegraf, Markup, session } = require('telegraf');
 const fs     = require('fs');
+const path   = require('path');
 const crypto = require('crypto');
 const initSqlJs = require('sql.js');
 const express   = require('express');
@@ -659,18 +660,27 @@ async function startSearch(ctx, opts = {}) {
 
 // ─── ONBOARDING WIZARD ────────────────────────────────────────────────────────
 async function startOnboarding(ctx, anon_id) {
-  await ctx.reply(
+  const introPath = path.join(__dirname, 'ghosttalk_intro.jpg');
+  const caption = (
     `👻 *Welcome to GhostTalk!*\n\n` +
     `Before we start matching you with awesome strangers, let's set up your anonymous profile in 3 quick steps:\n\n` +
-    `*Step 1 of 3: Select your gender*`,
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('👨 Male', 'ob_g_male'), Markup.button.callback('👩 Female', 'ob_g_female')],
-        [Markup.button.callback('🌈 Other', 'ob_g_other'), Markup.button.callback('🤐 Skip', 'ob_g_skip')]
-      ])
-    }
+    `*Step 1 of 3: Select your gender*`
   );
+  const kb = Markup.inlineKeyboard([
+    [Markup.button.callback('👨 Male', 'ob_g_male'), Markup.button.callback('👩 Female', 'ob_g_female')],
+    [Markup.button.callback('🌈 Other', 'ob_g_other'), Markup.button.callback('🤐 Skip', 'ob_g_skip')]
+  ]);
+
+  if (fs.existsSync(introPath)) {
+    try {
+      return await ctx.replyWithPhoto({ source: introPath }, {
+        caption,
+        parse_mode: 'Markdown',
+        ...kb
+      });
+    } catch(e) {}
+  }
+  await ctx.reply(caption, { parse_mode: 'Markdown', ...kb });
 }
 
 // ─── MINI GAMES ───────────────────────────────────────────────────────────────
@@ -1298,13 +1308,23 @@ bot.start(async ctx => {
     return startOnboarding(ctx, s.anon_id);
   }
 
-  await ctx.reply(
+  const welcomeText = (
     `👻 *Welcome to GhostTalk!*\n\n` +
     `Chat anonymously with people worldwide.\n` +
     `Your identity stays completely private — no names, no numbers.\n\n` +
-    `Tap *🚀 Find a partner* below to begin chatting!`,
-    { parse_mode:'Markdown', ...lobbyKb() }
+    `Tap *🚀 Find a partner* below to begin chatting!`
   );
+  const introPath = path.join(__dirname, 'ghosttalk_intro.jpg');
+  if (fs.existsSync(introPath)) {
+    try {
+      return await ctx.replyWithPhoto({ source: introPath }, {
+        caption: welcomeText,
+        parse_mode: 'Markdown',
+        ...lobbyKb()
+      });
+    } catch(e) {}
+  }
+  await ctx.reply(welcomeText, { parse_mode: 'Markdown', ...lobbyKb() });
 });
 
 async function showProfile(ctx) {
@@ -2025,6 +2045,11 @@ function requireDashSecret(req, res, next) {
 
 // ── PUBLIC: Health + basic stats ──────────────────────────────────────────────
 webApp.get(['/health', '/api/health'], (req, res) => res.json({ status:'ok', uptime:process.uptime() }));
+webApp.get('/ghosttalk_intro.jpg', (req, res) => {
+  const p = path.join(__dirname, 'ghosttalk_intro.jpg');
+  if (fs.existsSync(p)) res.sendFile(p);
+  else res.status(404).send('Not found');
+});
 
 webApp.get('/api/stats', (req, res) => {
   res.json({
