@@ -217,7 +217,12 @@ function ensureUserRow(anon_id, tg_id = null) {
 
 function getUser(anon_id, tg_id = null) {
   ensureUserRow(anon_id, tg_id);
-  return db.prepare('SELECT * FROM users WHERE anon_id=?').get(anon_id);
+  let user = db.prepare('SELECT * FROM users WHERE anon_id=?').get(anon_id);
+  if ((!user || !user.gender) && tg_id && db) {
+    const existingWithProfile = db.prepare('SELECT * FROM users WHERE tg_id=? AND gender IS NOT NULL AND gender != "" ORDER BY created_at DESC').get(tg_id);
+    if (existingWithProfile) return existingWithProfile;
+  }
+  return user;
 }
 
 function getRating(anon_id) {
@@ -254,11 +259,17 @@ function logChat(chatId, aA, aB, sa, ea, mc, er) {
 
 function checkPremiumExpiry(anon_id) {
   const u = getUser(anon_id);
+  if (!u) return false;
   if (u.vip_tier > 0 && u.premium_expires && new Date(u.premium_expires) < new Date()) {
     db.prepare('UPDATE users SET vip_tier=0,premium=0,premium_expires=NULL WHERE anon_id=?').run(anon_id);
     return false;
   }
-  return u.vip_tier > 0;
+  return (u.vip_tier || 0) > 0 || (u.premium || 0) === 1;
+}
+
+function isVip(anon_id) {
+  if (!anon_id) return false;
+  return checkPremiumExpiry(anon_id);
 }
 
 // Real-time stat helpers
@@ -342,7 +353,7 @@ function ensureSession(ctx) {
     let existing = null;
     if (tg_id && db) {
       try {
-        existing = db.prepare('SELECT anon_id, vip_tier FROM users WHERE tg_id=? ORDER BY created_at DESC').get(tg_id);
+        existing = db.prepare('SELECT anon_id, vip_tier, gender FROM users WHERE tg_id=? ORDER BY (gender IS NOT NULL AND gender != "") DESC, created_at DESC').get(tg_id);
       } catch(e) {}
     }
     const anon_id = existing?.anon_id || makeAnonId();
@@ -534,7 +545,14 @@ async function startSearch(ctx, opts = {}) {
   }
   s.inChat = false;
 
-  const u = getUser(s.anon_id);
+  let u = getUser(s.anon_id, ctx.from?.id);
+  if ((!u || !u.gender) && ctx.from?.id && db) {
+    const withProfile = db.prepare('SELECT * FROM users WHERE tg_id=? AND gender IS NOT NULL AND gender != "" ORDER BY created_at DESC').get(ctx.from.id);
+    if (withProfile) {
+      s.anon_id = withProfile.anon_id;
+      u = withProfile;
+    }
+  }
   if (u.banned) return ctx.reply(`🚫 You are banned. Reason: ${u.ban_reason || 'rule violation'}`);
 
   // Quick onboarding if gender/profile not configured
@@ -1579,7 +1597,8 @@ bot.action(/ob_g_(.+)/, async ctx => {
   await ctx.answerCbQuery();
   const s = ensureSession(ctx);
   const g = ctx.match[1] === 'skip' ? 'unspecified' : ctx.match[1];
-  db.prepare('UPDATE users SET gender=? WHERE anon_id=?').run(g, s.anon_id);
+  const tg_id = ctx.from?.id || null;
+  db.prepare('UPDATE users SET gender=? WHERE anon_id=? OR (tg_id=? AND tg_id IS NOT NULL)').run(g, s.anon_id, tg_id);
   await ctx.editMessageText(
     `✅ Gender saved!\n\n*Step 2 of 4: Preferred Language*`,
     {
@@ -1667,8 +1686,9 @@ bot.action(/ob_i_(.+)/, async ctx => {
 bot.action('ob_done', async ctx => {
   await ctx.answerCbQuery('Setup complete!');
   const s = ensureSession(ctx);
-  db.prepare("UPDATE users SET gender=COALESCE(gender, 'unspecified') WHERE anon_id=?").run(s.anon_id);
-  const u = getUser(s.anon_id);
+  const tg_id = ctx.from?.id || null;
+  db.prepare("UPDATE users SET gender=COALESCE(NULLIF(gender,''), 'unspecified') WHERE anon_id=? OR (tg_id=? AND tg_id IS NOT NULL)").run(s.anon_id, tg_id);
+  const u = getUser(s.anon_id, tg_id);
   await ctx.reply(
     `🎉 *Profile Ready!*\n\n` +
     `👤 *Gender:* ${u.gender || 'Not specified'}\n` +
@@ -2004,7 +2024,7 @@ function requireDashSecret(req, res, next) {
 }
 
 // ── PUBLIC: Health + basic stats ──────────────────────────────────────────────
-webApp.get('/health', (req, res) => res.json({ status:'ok', uptime:process.uptime() }));
+webApp.get(['/health', '/api/health'], (req, res) => res.json({ status:'ok', uptime:process.uptime() }));
 
 webApp.get('/api/stats', (req, res) => {
   res.json({
